@@ -17,30 +17,19 @@
 You must configure the native browser database engine inside a dedicated database layer using the lightweight `idb` library.
 
 1. Create a `src/db/` directory.
-2. Create `src/db/db.js` (or `.ts`). Import `openDB` from `'idb'` and initialize a database named `'AsistenciaDB'` at version `1`.
+2. Create `src/db/db.js`. Import `openDB` from `'idb'` and initialize a database named `'AsistenciaDB'` at version `1`.
 3. Inside the `upgrade(db)` callback, create two distinct object stores strictly matching the architecture specification:
 
 
 * **Store 1: `visitorStore**`
 
 * Define the primary key path: `{ keyPath: 'visitorId' }`.
-
-
 * Create secondary indexes for fast lookups:
 * `db.createIndex('by_name', 'visitorName', { unique: false })`
 * `db.createIndex('by_status', 'attendanceStatus', { unique: false })`
 
-
-
-
 * **Store 2: `sessionStateStore**`
-
 * Define the primary key path: `{ keyPath: 'sessionId' }`.
-
-
-
-
-
 
 4. Export a singleton database promise or initializer function `getDB()` that ensures clean connection pooling across components.
 
@@ -64,7 +53,6 @@ Create a modular service layer to handle asynchronous database transactions with
 
 ```
 
-
 * **`getAllVisitors()`:** Returns all records currently stored in `visitorStore`.
 * **`getVisitorById(visitorId)`:** Performs a direct primary key lookup in `visitorStore`.
 
@@ -76,10 +64,6 @@ Create a modular service layer to handle asynchronous database transactions with
 
 
 * **`clearAllStores()`:** Executes a complete `.clear()` transaction across both `visitorStore` and `sessionStateStore`.
-
-
-
-
 
 ---
 
@@ -111,15 +95,11 @@ const normalizeText = (str) =>
 
 ```
 
-
 * **Rule 2 (Matching Algorithm):** Once length $\ge 3$, filter `visitorList` using case-insensitive, diacritic-insensitive substring matching (`String.prototype.includes`) against both normalized `visitorName` and `visitorId`.
-
 
 * **Rule 3 (DOM Rendering Ceiling):** Evaluate the filtered matches array length.
 
-
 * If `matches.length > 15`, abort UI rendering payload and return:
-
 
 ```javascript
 { 
@@ -130,14 +110,7 @@ const normalizeText = (str) =>
 
 ```
 
-
 * If `matches.length <= 15`, return `{ status: 'SUCCESS', data: matches }`.
-
-
-
-
-
-
 
 ---
 
@@ -152,19 +125,12 @@ Wire the database services and search engine guardrails into the React component
 * **"🌱 Cargar Datos Mock (IndexedDB)"**: Triggers `seedMockVisitors(mockData)` and alerts success.
 * **"🗑️ Limpiar DB"**: Triggers `clearAllStores()`.
 
-
-
-
 3. Open `src/components/Zone2Search.jsx` and update it to accept an `onSearchChange` callback prop. Wire the text input element to fire this callback on every keystroke.
+
 4. Open `src/App.jsx` and integrate the real-time database search flow:
 * Load the initial visitor list from `visitorStore` into state on component mount.
 * Pass the active search input string into `executeSearch(query, visitorList)`.
-
-
 * Map the returned search status (`IDLE`, `THRESHOLD_WARNING`, `OVERFLOW_WARNING`, or `SUCCESS`) directly into `Zone3Actions.jsx`.
-
-
-
 
 5. Open `src/components/Zone3Actions.jsx` and update the rendering logic for `READY_EMPTY`, `MULTI_MATCH`, and `CONFIRMED_MATCH`:
 
@@ -179,10 +145,6 @@ Wire the database services and search engine guardrails into the React component
 
 
 * In `CONFIRMED_MATCH`, wire the **"REGISTRAR ASISTENCIA"** button to execute `registerAttendance(id)`. On success, instantly update local state to render the gray badge (**"✓ ASISTENCIA REGISTRADA"**) and play a visual/textual confirmation. Wire **"Anular Registro"** to execute `undoAttendance(id)`.
-
-
-
-
 
 ---
 
@@ -218,21 +180,15 @@ Before reporting completion of Phase 3, execute the following terminal commands 
 1. `npm run dev` — Launch the application in Chrome.
 2. **Database Verification:** Open Chrome DevTools -> Application tab -> IndexedDB. Click **"🌱 Cargar Datos Mock"** in the developer bar. Confirm `AsistenciaDB` is created with `visitorStore` and `sessionStateStore`, and verify 20 records are populated in `visitorStore`.
 
-
 3. **Threshold Guardrail Check:** Type `"M"` then `"ME"` into the search bar. Verify no database results render and Zone 3 explicitly displays *"Escriba al menos 3 caracteres..."*.
 
-
 4. **DOM Rendering Ceiling Check:** Type `"MENDOZA"` (or the common surname seeded in your mock data that exceeds 15 records). Verify the list does not render and the screen explicitly displays the overflow alert: *"⚠️ Demasiados resultados encontrados..."*.
-
 
 5. **Mutation & Persistence Check:**
 * Type a specific full name to narrow results below 15 items. Select a visitor card to enter `CONFIRMED_MATCH`.
 
-
 * Click **"REGISTRAR ASISTENCIA"**. Verify the button switches to the attended badge.
 
-
 * Inspect DevTools -> IndexedDB -> `visitorStore`. Confirm the specific record now has `attendanceStatus: true`, a valid ISO-8601 string in `attendanceTimestamp`, and `syncedWithCloud: false`.
-
 
 * Refresh the browser tab. Search for the same visitor again and verify their check-in status persisted across browser reloads.

@@ -1,16 +1,51 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 
-const mockMatches = [
-  { visitorName: 'ANA GARCÍA', visitorId: '40123456' },
-  { visitorName: 'LUIS TORRES', visitorId: '41234567' },
-  { visitorName: 'MARTA RUIZ', visitorId: '42345678' },
-];
+export default function Zone3Actions({
+  activeState,
+  searchStatus,
+  searchResults = [],
+  searchMessage = '',
+  selectedVisitor,
+  onSelectVisitor,
+  onRegisterAttendance,
+  onUndoAttendance,
+}) {
+  const resolvedState = useMemo(() => {
+    if (searchStatus === 'THRESHOLD_WARNING' || searchStatus === 'OVERFLOW_WARNING') {
+      return 'READY_EMPTY';
+    }
 
-export default function Zone3Actions({ activeState }) {
-  const [isAttended, setIsAttended] = useState(false);
+    if (selectedVisitor) {
+      return 'CONFIRMED_MATCH';
+    }
+
+    if (searchStatus === 'SUCCESS' && searchResults.length > 0) {
+      return 'MULTI_MATCH';
+    }
+
+    return activeState;
+  }, [activeState, searchResults.length, searchStatus, selectedVisitor]);
 
   const stateContent = useMemo(() => {
-    switch (activeState) {
+    if (searchStatus === 'THRESHOLD_WARNING') {
+      return (
+        <div className="flex flex-1 items-center justify-center px-6 py-4 text-center">
+          <p className="text-base font-semibold text-amber-600">{searchMessage}</p>
+        </div>
+      );
+    }
+
+    if (searchStatus === 'OVERFLOW_WARNING') {
+      return (
+        <div className="flex flex-1 items-center justify-center px-6 py-4 text-center">
+          <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold leading-6 text-amber-700">
+            {searchMessage}
+          </p>
+        </div>
+      );
+    }
+
+    switch (resolvedState) {
       case 'AUTH_PENDING':
         return (
           <div className="flex flex-1 items-center justify-center p-4">
@@ -53,10 +88,11 @@ export default function Zone3Actions({ activeState }) {
       case 'MULTI_MATCH':
         return (
           <div className="flex-1 overflow-y-auto p-4 space-y-2">
-            {mockMatches.map((match) => (
+            {searchResults.map((match) => (
               <button
                 key={match.visitorId}
                 type="button"
+                onClick={() => onSelectVisitor?.(match)}
                 className="min-h-[56px] min-w-[56px] w-full rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm"
               >
                 <div className="text-base font-bold text-brand-slate">{match.visitorName}</div>
@@ -73,26 +109,32 @@ export default function Zone3Actions({ activeState }) {
               <p className="text-sm font-semibold uppercase tracking-[0.2em] text-brand-slate/70">
                 DATOS DEL VISITANTE
               </p>
-              <h2 className="mt-3 text-2xl font-black text-brand-slate">CARLOS MENDOZA</h2>
+              <h2 className="mt-3 text-2xl font-black text-brand-slate">
+                {selectedVisitor?.visitorName ?? 'VISITANTE SELECCIONADO'}
+              </h2>
               <p className="mt-2 text-base font-semibold text-brand-slate">
-                DNI: 71234568
+                DNI: {selectedVisitor?.visitorId ?? '—'}
               </p>
 
               <div className="mt-4 flex flex-wrap gap-2 text-sm font-medium text-brand-slate">
-                <span className="rounded-full bg-brand-light px-3 py-2">45 años</span>
-                <span className="rounded-full bg-brand-light px-3 py-2">PADRE</span>
+                <span className="rounded-full bg-brand-light px-3 py-2">
+                  {selectedVisitor?.visitorAge ? `${selectedVisitor.visitorAge} años` : 'Edad no disponible'}
+                </span>
+                <span className="rounded-full bg-brand-light px-3 py-2">
+                  {selectedVisitor?.relationship ?? 'RELACIÓN NO DISPONIBLE'}
+                </span>
               </div>
 
               <div className="mt-4 rounded-2xl bg-brand-light p-3 text-base font-semibold text-brand-slate">
-                Va a visitar a: MARIA MENDOZA
+                Va a visitar a: {selectedVisitor?.hostName ?? '—'}
               </div>
             </div>
 
             <div className="mt-auto flex flex-col gap-3">
-              {!isAttended ? (
+              {!selectedVisitor?.attendanceStatus ? (
                 <button
                   type="button"
-                  onClick={() => setIsAttended(true)}
+                  onClick={() => onRegisterAttendance?.(selectedVisitor?.visitorId)}
                   className="min-h-[56px] min-w-[56px] rounded-2xl bg-brand-emerald px-4 py-3 text-base font-extrabold uppercase tracking-wide text-white"
                 >
                   REGISTRAR ASISTENCIA
@@ -100,11 +142,11 @@ export default function Zone3Actions({ activeState }) {
               ) : (
                 <>
                   <div className="rounded-2xl bg-slate-200 px-4 py-3 text-center text-sm font-semibold text-brand-slate">
-                    ✓ ASISTENCIA REGISTRADA [Hora: 11:15]
+                    ✓ ASISTENCIA REGISTRADA
                   </div>
                   <button
                     type="button"
-                    onClick={() => setIsAttended(false)}
+                    onClick={() => onUndoAttendance?.(selectedVisitor?.visitorId)}
                     className="min-h-[56px] min-w-[56px] rounded-2xl bg-transparent px-3 py-2 text-sm font-semibold text-brand-slate underline"
                   >
                     Anular Registro
@@ -118,7 +160,7 @@ export default function Zone3Actions({ activeState }) {
       default:
         return null;
     }
-  }, [activeState, isAttended]);
+  }, [onRegisterAttendance, onSelectVisitor, onUndoAttendance, resolvedState, searchMessage, searchStatus, searchResults, selectedVisitor]);
 
   return <div className="flex h-full flex-col bg-brand-light">{stateContent}</div>;
 }

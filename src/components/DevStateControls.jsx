@@ -1,6 +1,13 @@
 const states = ['AUTH_PENDING', 'FILE_PICKER_PENDING', 'READY_EMPTY', 'MULTI_MATCH', 'CONFIRMED_MATCH'];
 
-export default function DevStateControls({ currentState, onStateChange, isOffline, onOfflineToggle }) {
+export default function DevStateControls({
+  currentState,
+  onStateChange,
+  isOffline,
+  onOfflineToggle,
+  onSeedMockData,
+  onClearDatabase,
+}) {
   return (
     <div className="absolute bottom-3 left-3 right-3 rounded-2xl border border-slate-200/80 bg-white/80 px-3 py-3 shadow-lg backdrop-blur-sm">
       <div className="flex flex-wrap items-center gap-2">
@@ -18,6 +25,22 @@ export default function DevStateControls({ currentState, onStateChange, isOfflin
             {state}
           </button>
         ))}
+
+        <button
+          type="button"
+          onClick={onSeedMockData}
+          className="min-h-[56px] rounded-xl bg-brand-emerald px-3 py-2 text-xs font-semibold uppercase tracking-wide text-white"
+        >
+          🌱 Cargar Datos Mock (IndexedDB)
+        </button>
+
+        <button
+          type="button"
+          onClick={onClearDatabase}
+          className="min-h-[56px] rounded-xl bg-brand-amber px-3 py-2 text-xs font-semibold uppercase tracking-wide text-white"
+        >
+          🗑️ Limpiar DB
+        </button>
 
         <button
           type="button"
