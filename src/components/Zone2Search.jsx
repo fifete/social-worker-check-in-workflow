@@ -1,7 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
-export default function Zone2Search({ isDisabled = false, onSearchChange }) {
-  const [query, setQuery] = useState('');
+export default function Zone2Search({ isDisabled = false, onSearchChange, searchValue = '' }) {
+  const [query, setQuery] = useState(searchValue);
+
+  useEffect(() => {
+    setQuery(searchValue);
+  }, [searchValue]);
 
   const handleChange = (event) => {
     const nextQuery = event.target.value;

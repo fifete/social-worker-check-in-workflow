@@ -7,7 +7,18 @@ export default function DevStateControls({
   onOfflineToggle,
   onSeedMockData,
   onClearDatabase,
+  onSimulateBarcodeScan,
+  defaultScanValue = '12345678',
 }) {
+  const handleSimulateBarcodeScan = () => {
+    const simulatedValue = window.prompt('Ingrese un identificador para simular escaneo', defaultScanValue);
+
+    if (simulatedValue === null) {
+      return;
+    }
+
+    onSimulateBarcodeScan?.(simulatedValue);
+  };
   return (
     <div className="absolute bottom-3 left-3 right-3 rounded-2xl border border-slate-200/80 bg-white/80 px-3 py-3 shadow-lg backdrop-blur-sm">
       <div className="flex flex-wrap items-center gap-2">
@@ -25,6 +36,14 @@ export default function DevStateControls({
             {state}
           </button>
         ))}
+
+        <button
+          type="button"
+          onClick={handleSimulateBarcodeScan}
+          className="min-h-[56px] rounded-xl bg-brand-emerald px-3 py-2 text-xs font-semibold uppercase tracking-wide text-white"
+        >
+          📷 Simular Escaneo DNI
+        </button>
 
         <button
           type="button"

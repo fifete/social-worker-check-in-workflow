@@ -35,45 +35,22 @@ npm install @zxing/library
 
 You must implement a dedicated service to handle hardware stream access, feature detection, barcode decoding, and string normalization.
 
-1. Create `src/services/scannerService.js` (or `.ts`).
+1. Create `src/services/scannerService.js`.
 2. Implement `normalizeBarcodeString(rawValue)`. This function must clean raw scanned string outputs from physical identity documents:
-
 
 * Strip all leading/trailing whitespace and control characters.
 * Extract purely numeric strings (standard 8-digit Peruvian DNI).
-
-
 * Parse alphanumeric strings (e.g., Carnets de Extranjería, Passports) by stripping special formatting symbols and converting alphanumeric characters to uppercase.
-
-
-
 
 3. Implement `createScannerInstance(videoElement, onDecode, onError)`. This initializer must execute a progressive hardware feature detection check:
 * **Primary Engine Check (Native Web API):** Check if `window.BarcodeDetector` is supported by the browser.
-
-
 * If supported, instantiate `new BarcodeDetector({ formats: ['code_39', 'code_128', 'pdf417'] })` to match linear and matrix formats.
-
-
 * Attach a requestAnimationFrame loop or timer to repeatedly call `barcodeDetector.detect(videoElement)` on the live camera stream.
-
-
-
-
 * **Secondary Fallback Engine (Local ZXing Bundle):** If `window.BarcodeDetector` is undefined, import and instantiate `BrowserMultiFormatReader` from `'@zxing/library'`.
-
-
 * Configure the reader to decode linear Code 39, Code 128, and PDF417 matrix formats.
-
-
 * Bind the reader to `videoElement` using `decodeFromVideoDevice(undefined, videoElement, callback)`.
 
-
-
-
 4. Inside both decoding pathways, pass the raw decoded string through `normalizeBarcodeString(rawValue)` and execute the `onDecode(normalizedId)` callback immediately.
-
-
 
 ---
 
@@ -91,12 +68,7 @@ Replace the static reticle placeholder from Phase 2 with a live hardware camera 
 * Initialize `createScannerInstance(videoRef.current, onScanSuccess, onScanError)`.
 * **Cleanup Guardrail:** On component unmount or when `isActive === false`, explicitly stop all hardware media tracks (`stream.getTracks().forEach(track => track.stop())`) and cancel scanner detection loops to conserve device battery.
 
-
-
-
 5. Add an on-screen error state overlay inside the reticle container if camera permission is denied by the OS or browser: *"⚠️ Acceso a cámara denegado. Use el buscador de texto."*
-
-
 ---
 
 ## Task 4: Connect Scanner Stream to Active Search & Check-In Loop
@@ -107,22 +79,13 @@ Decoded barcode strings must instantly bridge into the IndexedDB search engine a
 2. Define a handler function `handleBarcodeScanned(scannedIdentifier)`:
 * Execute an immediate primary key lookup using `getVisitorById(scannedIdentifier)` from `src/services/visitorService.js`.
 
-
 * **Match Found (Exact ID):** Immediately transition the UI State Machine to `'CONFIRMED_MATCH'` and load the retrieved visitor object into active focus in Zone 3.
 
-
 * **No Exact Match Found:** Populate the Zone 2 search input field (`Zone2Search`) with `scannedIdentifier` and trigger `executeSearch(scannedIdentifier, visitorList)` to check for partial substring matches or display appropriate helper text.
-
-
-
 
 3. Pass `handleBarcodeScanned` as a prop (`onScanSuccess`) into `<Zone1Scanner isActive="{!isAuthPhase}" onScanSuccess="{handleBarcodeScanned}"/>`.
 4. Open `src/components/DevStateControls.jsx` and add a manual simulation button:
 * **"📷 Simular Escaneo DNI"**: Prompts the developer for a string (or inputs a default ID from `mockData.js`) and invokes `handleBarcodeScanned(simulatedId)` to allow desktop testing without physical barcodes.
-
-
-
-
 
 ---
 
@@ -157,31 +120,18 @@ Before reporting completion of Phase 4, execute the following terminal commands 
 
 1. `npm run dev` — Launch the application. Ensure mock data is loaded into IndexedDB (`AsistenciaDB`) via the developer bar trigger.
 
-
 2. **Simulation Check (Desktop/No Camera):** Click **"📷 Simular Escaneo DNI"** in `DevStateControls`. Input a valid primary key `visitorId` from your seeded mock dataset. Verify the app transitions instantly to `'CONFIRMED_MATCH'` and renders the correct visitor card in Zone 3.
-
 
 3. **Hardware Stream Check (Android Chrome / Webcam):**
 * Access the local development server from a mobile device or laptop webcam.
 * Verify the browser prompts for camera permission and displays the live video stream inside the Zone 1 container with the emerald green reticle.
 
-
-
-
 4. **Physical & Screen Scanning Verification:**
 * Generate a test Code 39 or Code 128 barcode representing one of your seeded mock DNI strings using an online barcode generator.
-
-
 * Point the camera at the generated barcode. Verify the scanner reads the string, strips formatting, performs the IndexedDB lookup, and instantly loads the attendee into `'CONFIRMED_MATCH'` without manual typing.
-
-
-
 
 5. **Offline Asset Verification:**
 * In Chrome DevTools, open the **Network** tab and check **"Offline"**.
 * Reload the page or re-initialize the scanner. Confirm `@zxing/library` executes cleanly without attempting to fetch external resources over the network.
-
-
-
 
 6. `npm run build` — Confirm the build bundler compiles the ZXing fallback scripts into static local assets (`dist/assets`) without dependency tree errors.

@@ -9,6 +9,7 @@ import { executeSearch } from './services/searchService';
 import {
   clearAllStores,
   getAllVisitors,
+  getVisitorById,
   registerAttendance,
   seedMockVisitors,
   undoAttendance,
@@ -81,6 +82,34 @@ export default function App() {
     setAppState('CONFIRMED_MATCH');
   };
 
+  const handleBarcodeScanned = async (scannedIdentifier) => {
+    const normalizedIdentifier = String(scannedIdentifier ?? '').trim();
+
+    if (!normalizedIdentifier) {
+      return;
+    }
+
+    try {
+      const matchedVisitor = await getVisitorById(normalizedIdentifier);
+
+      if (matchedVisitor) {
+        setSelectedVisitor(matchedVisitor);
+        setAppState('CONFIRMED_MATCH');
+        return;
+      }
+
+      const searchResult = executeSearch(normalizedIdentifier, visitorList);
+      setSearchQuery(normalizedIdentifier);
+      setSearchStatus(searchResult.status);
+      setSearchResults(searchResult.data ?? []);
+      setSearchMessage(searchResult.message ?? '');
+      setAppState(searchResult.data?.length > 1 ? 'MULTI_MATCH' : 'READY_EMPTY');
+    } catch (error) {
+      console.error(error);
+      alert('No se pudo procesar el escaneo');
+    }
+  };
+
   const handleRegisterAttendance = async (visitorId) => {
     try {
       const updatedVisitor = await registerAttendance(visitorId);
@@ -111,9 +140,15 @@ export default function App() {
     <main className="relative flex h-screen w-screen flex-col overflow-hidden bg-brand-light text-brand-slate select-none">
       <Header isOffline={isOffline} />
 
-      {!isAuthPhase && <Zone1Scanner isActive={true} />}
+      {!isAuthPhase && (
+        <Zone1Scanner isActive={!isAuthPhase} onScanSuccess={handleBarcodeScanned} />
+      )}
 
-      <Zone2Search isDisabled={isAuthPhase} onSearchChange={setSearchQuery} />
+      <Zone2Search
+        isDisabled={isAuthPhase}
+        onSearchChange={setSearchQuery}
+        searchValue={searchQuery}
+      />
 
       <div className="relative flex flex-1 flex-col overflow-hidden">
         <Zone3Actions
@@ -135,6 +170,8 @@ export default function App() {
         onOfflineToggle={() => setIsOffline(!isOffline)}
         onSeedMockData={handleSeedMockData}
         onClearDatabase={handleClearDatabase}
+        onSimulateBarcodeScan={handleBarcodeScanned}
+        defaultScanValue={mockData[0]?.visitorId ?? '12345678'}
       />
     </main>
   );

@@ -180,9 +180,9 @@ const mockData = [
     visitorDist: 'MOQUEGUA',
   },
   {
-    visitorId: '41678901',
-    visitorName: 'PAMELA MENDOZA',
-    visitorAge: 18,
+    visitorId: '73022784',
+    visitorName: 'DANIELA FUENTES',
+    visitorAge: 22,
     relationship: 'HIJA',
     hostName: 'RAÚL MENDOZA',
     hostId: '162345678',
