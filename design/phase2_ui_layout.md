@@ -13,14 +13,12 @@
 You must structure the application into a strict, non-scrolling mobile viewport partitioned into three fixed semantic zones, topped by a responsive header.
 
 1. Create a `src/components/` directory to house modular UI elements.
+
 2. Create `src/components/Header.jsx` (or `.tsx`). It must render:
 * A left-aligned title: **"Control de Asistencia"** styled with `font-bold text-xl text-brand-slate`.
 * An upper-right dynamic badge indicating network status. For this visual sandbox, accept a `isOffline` boolean prop:
 * *Connected (`false`):* Green indicator circle with text **"Conectado"**.
 * *Disconnected (`true`):* Amber indicator circle (`bg-brand-amber`) with text **"Modo Local (Fuera de línea)"**.
-
-
-
 
 3. Open `src/App.jsx`. Configure the root container to enforce viewport lock and prevent horizontal or uncontrolled vertical scrolling:
 ```jsx
@@ -28,10 +26,7 @@ You must structure the application into a strict, non-scrolling mobile viewport 
   <Header isOffline={false} />
   {/* Zones 1, 2, and 3 will be injected here */}
 </main>
-
 ```
-
-
 
 ---
 
@@ -79,12 +74,6 @@ Zone 3 (bottom 55% height) dynamically shifts based on the operational state of 
 * *Master Action Button:* Provide an internal toggle state to switch between **Unattended** and **Attended**.
 * *Unattended:* Solid Emerald Green button (`bg-brand-emerald text-white font-extrabold uppercase`). Label: **"REGISTRAR ASISTENCIA"**.
 * *Attended:* Unclickable gray badge reading **"✓ ASISTENCIA REGISTRADA [Hora: 11:15]"** with a low-profile text button beneath labeled **"Anular Registro"**.
-
-
-
-
-
-
 
 ---
 
