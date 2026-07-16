@@ -8,6 +8,8 @@ export default function DevStateControls({
   onSeedMockData,
   onClearDatabase,
   onSimulateBarcodeScan,
+  onSimulateGoogleAuth,
+  onSimulateExpiredToken,
   defaultScanValue = '12345678',
 }) {
   const handleSimulateBarcodeScan = () => {
@@ -59,6 +61,22 @@ export default function DevStateControls({
           className="min-h-[56px] rounded-xl bg-brand-amber px-3 py-2 text-xs font-semibold uppercase tracking-wide text-white"
         >
           🗑️ Limpiar DB
+        </button>
+
+        <button
+          type="button"
+          onClick={onSimulateGoogleAuth}
+          className="min-h-[56px] rounded-xl bg-brand-blue px-3 py-2 text-xs font-semibold uppercase tracking-wide text-white"
+        >
+          🔑 Simular Auth Google
+        </button>
+
+        <button
+          type="button"
+          onClick={onSimulateExpiredToken}
+          className="min-h-[56px] rounded-xl bg-brand-amber px-3 py-2 text-xs font-semibold uppercase tracking-wide text-white"
+        >
+          ⏳ Simular Token Expirado
         </button>
 
         <button

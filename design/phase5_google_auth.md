@@ -50,16 +50,12 @@ const SCOPES = [
 
 ```
 
-
 2. Implement `initTokenClient(onAuthSuccess, onAuthError)`:
 * Call `window.google.accounts.oauth2.initTokenClient({ ... })` passing `import.meta.env.VITE_GOOGLE_CLIENT_ID`, the defined `SCOPES`, and a callback handler.
 * Ensure the callback extracts `response.access_token` and checks for error flags (`response.error`).
 
-
 3. Implement `saveSessionToken(tokenResponse)`:
 * Open an IndexedDB transaction targeting `sessionStateStore` via our `src/db/db.js` wrapper.
-
-
 * Write or update the session record matching the primary key specification:
 
 
@@ -74,21 +70,12 @@ const SCOPES = [
 
 ```
 
-
-
-
 4. Implement `getValidToken()`:
 * Read the `'CURRENT_SESSION'` record from `sessionStateStore`.
-
-
 * If no record exists, return `null`.
 * **1-Hour Expiration Guardrail:** Google client-side access tokens expire strictly after 3600 seconds. Calculate elapsed time: `Date.now() - record.tokenAcquisitionTime`.
-
-
 * If elapsed time is $< 3500000\text{ ms}$ (~58 minutes safety threshold), return `record.authToken`.
 * If elapsed time is $\ge 3500000\text{ ms}$, return `null` (flagging the token as expired).
-
-
 
 ---
 
@@ -104,12 +91,7 @@ Due to strict third-party cookie blocking in modern mobile browsers (including A
 2. Implement an expiration interception helper `handleExpiredTokenReAuth(tokenClient)`:
 * When an expired token is detected during an active shift or pre-sync check, do **NOT** attempt a silent iframe refresh.
 * Return a structured state object instructing the UI to display the mandatory alert notice: *"Su sesión ha expirado. Por favor, confirme su cuenta de Google en la ventana emergente para finalizar la sincronización."*
-
 * Trigger `tokenClient.requestAccessToken({ prompt: '' })` to launch the interactive Google confirmation modal cleanly over the active viewport.
-
-
-
-
 
 ---
 
@@ -120,37 +102,19 @@ Connect the GIS authentication service to the boot loop health check and wire th
 1. Open `src/App.jsx` and update the boot sequence logic (`useEffect` on mount):
 * **Step 1 (The Offline Boot Loop):** Query `getAllVisitors()` from `visitorStore`. If the array length is $> 0$, completely bypass Google authentication and set `appState` to `'READY_EMPTY'`.
 
-
 * **Step 2 (Token Health Check):** If `visitorStore` is empty, execute `getValidToken()`.
 * If a valid token string is returned, transition directly to `'FILE_PICKER_PENDING'`.
-
-
 * If `getValidToken()` returns `null`, set `appState` to `'AUTH_PENDING'`.
-
-
-
-
-
 
 2. Open `src/components/Zone3Actions.jsx`:
 * In the `'AUTH_PENDING'` block, wire the **"CONECTAR CON GOOGLE"** (`bg-brand-blue`) button onClick handler to execute `requestGoogleAuth()`.
-
-
 * While the GIS popup is active, disable the button and show a loading spinner or text: *"Conectando con Google..."*
 * Upon receipt of a successful OAuth callback and persistence to `sessionStateStore`, instantly transition `appState` from `'AUTH_PENDING'` to `'FILE_PICKER_PENDING'`.
-
-
-
 
 3. Open `src/components/DevStateControls.jsx` and add two developer simulation triggers:
 * **"🔑 Simular Auth Google"**: Writes a mock token (`"mock_oauth_token_123"`) and current timestamp to `sessionStateStore`, then forces state to `'FILE_PICKER_PENDING'`.
 
-
 * **"⏳ Simular Token Expirado"**: Mutates the record in `sessionStateStore` by setting `tokenAcquisitionTime: Date.now() - 7200000` (2 hours in the past) to test the expiration interceptor.
-
-
-
-
 
 ---
 
@@ -187,38 +151,20 @@ Before reporting completion of Phase 5, execute the following terminal commands 
 
 1. `npm run dev` — Launch the application in Chrome. Ensure `visitorStore` is cleared (`clearAllStores()`) to force the app into `'AUTH_PENDING'`.
 
-
 2. **Simulation Check (No Credentials Required):**
 * Click **"🔑 Simular Auth Google"** in the developer control bar.
-
-
 * Open Chrome DevTools -> Application -> IndexedDB -> `AsistenciaDB` -> `sessionStateStore`. Verify a record exists with key `'CURRENT_SESSION'`, a populated `authToken`, and a valid timestamp.
-
-
 * Confirm the UI immediately shifts from the blue login button to the solid slate **"SELECCIONAR EXCEL DE DRIVE"** button (`'FILE_PICKER_PENDING'`).
-
-
-
 
 3. **Live GIS OAuth Verification (Requires `.env` Client ID):**
 * Clear the local database and click **"CONECTAR CON GOOGLE"** in Zone 3.
-
-
 * Confirm the Google account selection pop-up modal launches cleanly over the window.
 * Log in with a valid Google account. Confirm the modal closes, the live access token is written to `sessionStateStore`, and the UI transitions to `'FILE_PICKER_PENDING'` without page reloads.
-
-
-
 
 4. **Token Expiration & Intercept Verification:**
 * Click **"⏳ Simular Token Expirado"** in the developer bar.
 * Execute `getValidToken()` in the browser console or trigger an auth check. Verify it returns `null` despite a token string being present in storage (confirming the 1-hour math calculation enforces token invalidation correctly).
 
-
-
-
 5. **Offline Boot Loop Bypass Verification:**
 * Click **"🌱 Cargar Datos Mock (IndexedDB)"** to populate `visitorStore`.
-
-
 * Refresh the browser tab. Confirm that because event records exist locally, the app **completely ignores** expired or missing tokens in `sessionStateStore` and boots directly into `'READY_EMPTY'`.

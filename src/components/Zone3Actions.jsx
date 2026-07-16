@@ -9,6 +9,11 @@ export default function Zone3Actions({
   onSelectVisitor,
   onRegisterAttendance,
   onUndoAttendance,
+  onAuthenticate,
+  isAuthenticating = false,
+  authMessage = '',
+  onSelectFile,
+  onSyncWithDrive,
 }) {
   const resolvedState = useMemo(() => {
     if (searchStatus === 'THRESHOLD_WARNING' || searchStatus === 'OVERFLOW_WARNING') {
@@ -48,13 +53,18 @@ export default function Zone3Actions({
     switch (resolvedState) {
       case 'AUTH_PENDING':
         return (
-          <div className="flex flex-1 items-center justify-center p-4">
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 p-4 text-center">
             <button
               type="button"
-              className="min-h-[56px] min-w-[56px] rounded-2xl bg-brand-blue px-6 py-4 text-base font-bold uppercase tracking-wide text-white shadow-sm"
+              onClick={() => onAuthenticate?.()}
+              disabled={isAuthenticating}
+              className="min-h-[56px] min-w-[56px] cursor-pointer rounded-2xl bg-brand-blue px-6 py-4 text-base font-bold uppercase tracking-wide text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-70"
             >
-              CONECTAR CON GOOGLE
+              {isAuthenticating ? 'Conectando con Google...' : 'CONECTAR CON GOOGLE'}
             </button>
+            {authMessage ? (
+              <p className="text-sm font-semibold text-brand-slate">{authMessage}</p>
+            ) : null}
           </div>
         );
 
@@ -63,7 +73,8 @@ export default function Zone3Actions({
           <div className="flex flex-1 items-center justify-center p-4">
             <button
               type="button"
-              className="min-h-[56px] min-w-[56px] rounded-2xl bg-brand-slate px-6 py-4 text-base font-bold uppercase tracking-wide text-white shadow-sm"
+              onClick={() => onSelectFile?.()}
+              className="min-h-[56px] min-w-[56px] cursor-pointer rounded-2xl bg-brand-slate px-6 py-4 text-base font-bold uppercase tracking-wide text-white shadow-sm"
             >
               SELECCIONAR EXCEL DE DRIVE
             </button>
@@ -78,7 +89,8 @@ export default function Zone3Actions({
             </p>
             <button
               type="button"
-              className="min-h-[56px] min-w-[56px] w-full rounded-2xl bg-gray-200 px-4 py-3 text-sm font-semibold text-brand-slate"
+              onClick={() => onSyncWithDrive?.()}
+              className="min-h-[56px] min-w-[56px] w-full cursor-pointer rounded-2xl bg-gray-200 px-4 py-3 text-sm font-semibold text-brand-slate"
             >
               Sincronizar Datos con Drive
             </button>
@@ -93,7 +105,7 @@ export default function Zone3Actions({
                 key={match.visitorId}
                 type="button"
                 onClick={() => onSelectVisitor?.(match)}
-                className="min-h-[56px] min-w-[56px] w-full rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm"
+                className="min-h-[56px] min-w-[56px] w-full cursor-pointer rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm"
               >
                 <div className="text-base font-bold text-brand-slate">{match.visitorName}</div>
                 <div className="text-sm font-medium text-brand-slate">{match.visitorId}</div>
@@ -135,7 +147,7 @@ export default function Zone3Actions({
                 <button
                   type="button"
                   onClick={() => onRegisterAttendance?.(selectedVisitor?.visitorId)}
-                  className="min-h-[56px] min-w-[56px] rounded-2xl bg-brand-emerald px-4 py-3 text-base font-extrabold uppercase tracking-wide text-white"
+                  className="min-h-[56px] min-w-[56px] cursor-pointer rounded-2xl bg-brand-emerald px-4 py-3 text-base font-extrabold uppercase tracking-wide text-white"
                 >
                   REGISTRAR ASISTENCIA
                 </button>
@@ -147,7 +159,7 @@ export default function Zone3Actions({
                   <button
                     type="button"
                     onClick={() => onUndoAttendance?.(selectedVisitor?.visitorId)}
-                    className="min-h-[56px] min-w-[56px] rounded-2xl bg-transparent px-3 py-2 text-sm font-semibold text-brand-slate underline"
+                    className="min-h-[56px] min-w-[56px] cursor-pointer rounded-2xl bg-transparent px-3 py-2 text-sm font-semibold text-brand-slate underline"
                   >
                     Anular Registro
                   </button>
@@ -160,7 +172,7 @@ export default function Zone3Actions({
       default:
         return null;
     }
-  }, [onRegisterAttendance, onSelectVisitor, onUndoAttendance, resolvedState, searchMessage, searchStatus, searchResults, selectedVisitor]);
+  }, [authMessage, isAuthenticating, onAuthenticate, onRegisterAttendance, onSelectVisitor, onUndoAttendance, resolvedState, searchMessage, searchStatus, searchResults, selectedVisitor]);
 
   return <div className="flex h-full flex-col bg-brand-light">{stateContent}</div>;
 }

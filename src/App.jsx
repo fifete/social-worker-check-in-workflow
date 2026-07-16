@@ -4,7 +4,15 @@ import Zone1Scanner from './components/Zone1Scanner';
 import Zone2Search from './components/Zone2Search';
 import Zone3Actions from './components/Zone3Actions';
 import DevStateControls from './components/DevStateControls';
+import { getDB } from './db/db.js';
 import mockData from './db/mockData';
+import {
+  getValidToken,
+  initTokenClient,
+  loadGoogleIdentityScript,
+  requestGoogleAuth,
+  saveSessionToken,
+} from './services/authService';
 import { executeSearch } from './services/searchService';
 import {
   clearAllStores,
@@ -24,6 +32,9 @@ export default function App() {
   const [searchStatus, setSearchStatus] = useState('IDLE');
   const [searchResults, setSearchResults] = useState([]);
   const [searchMessage, setSearchMessage] = useState('');
+  const [tokenClient, setTokenClient] = useState(null);
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [authMessage, setAuthMessage] = useState('');
 
   const isAuthPhase = appState === 'AUTH_PENDING' || appState === 'FILE_PICKER_PENDING';
 
@@ -37,10 +48,45 @@ export default function App() {
 
       return visitors.find((visitor) => visitor.visitorId === current.visitorId) ?? null;
     });
+
+    if (visitors.length > 0) {
+      setAppState('READY_EMPTY');
+      return;
+    }
+
+    const validToken = await getValidToken();
+    setAppState(validToken ? 'FILE_PICKER_PENDING' : 'AUTH_PENDING');
   };
 
   useEffect(() => {
-    refreshVisitors();
+    let isMounted = true;
+
+    const initializeBootSequence = async () => {
+      try {
+        await refreshVisitors();
+
+        if (!isMounted) {
+          return;
+        }
+
+        if (appState === 'AUTH_PENDING' || appState === 'FILE_PICKER_PENDING') {
+          await loadGoogleIdentityScript();
+          const client = initTokenClient(handleAuthSuccess, handleAuthError);
+          setTokenClient(client);
+        }
+      } catch (error) {
+        console.error(error);
+        if (isMounted) {
+          setAppState('AUTH_PENDING');
+        }
+      }
+    };
+
+    initializeBootSequence();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -49,6 +95,38 @@ export default function App() {
     setSearchResults(result.data ?? []);
     setSearchMessage(result.message ?? '');
   }, [searchQuery, visitorList]);
+
+  const handleAuthSuccess = async () => {
+    setIsAuthenticating(false);
+    setAuthMessage('');
+    setAppState('FILE_PICKER_PENDING');
+  };
+
+  const handleAuthError = (error) => {
+    console.error(error);
+    setIsAuthenticating(false);
+    setAuthMessage('No se pudo conectar con Google. Intente nuevamente.');
+    setAppState('AUTH_PENDING');
+  };
+
+  const handleAuthenticate = async () => {
+    try {
+      setIsAuthenticating(true);
+      setAuthMessage('Conectando con Google...');
+
+      if (!tokenClient) {
+        await loadGoogleIdentityScript();
+        const client = initTokenClient(handleAuthSuccess, handleAuthError);
+        setTokenClient(client);
+        requestGoogleAuth(client, 'select_account');
+        return;
+      }
+
+      requestGoogleAuth(tokenClient, 'select_account');
+    } catch (error) {
+      handleAuthError(error);
+    }
+  };
 
   const handleSeedMockData = async () => {
     try {
@@ -70,10 +148,47 @@ export default function App() {
       setSearchStatus('IDLE');
       setSearchResults([]);
       setSearchMessage('');
-      setAppState('READY_EMPTY');
+      setAuthMessage('');
+      setIsAuthenticating(false);
+      setAppState('AUTH_PENDING');
     } catch (error) {
       console.error(error);
       alert('No se pudo limpiar la base de datos');
+    }
+  };
+
+  const handleSimulateGoogleAuth = async () => {
+    try {
+      await saveSessionToken({ access_token: 'mock_oauth_token_123' });
+      setAppState('FILE_PICKER_PENDING');
+      setAuthMessage('');
+      setIsAuthenticating(false);
+    } catch (error) {
+      console.error(error);
+      alert('No se pudo simular la autenticación');
+    }
+  };
+
+  const handleSimulateExpiredToken = async () => {
+    try {
+      const db = await getDB();
+      const tx = db.transaction(['sessionStateStore'], 'readwrite');
+      const store = tx.objectStore('sessionStateStore');
+      const sessionRecord = await store.get('CURRENT_SESSION');
+
+      if (sessionRecord) {
+        await store.put({
+          ...sessionRecord,
+          tokenAcquisitionTime: Date.now() - 7_200_000,
+        });
+      }
+
+      await tx.done;
+      setAppState('AUTH_PENDING');
+      setAuthMessage('');
+    } catch (error) {
+      console.error(error);
+      alert('No se pudo simular el token expirado');
     }
   };
 
@@ -136,6 +251,16 @@ export default function App() {
     }
   };
 
+  // Phase 6: Google Picker will open here to select the master spreadsheet from Drive.
+  const handleSelectFile = () => {
+    console.warn('handleSelectFile: Google Picker not yet implemented (Phase 6).');
+  };
+
+  // Phase 6: Batch sync of attendance records to the working Drive copy.
+  const handleSyncWithDrive = () => {
+    console.warn('handleSyncWithDrive: Drive batch sync not yet implemented (Phase 6).');
+  };
+
   return (
     <main className="relative flex h-screen w-screen flex-col overflow-hidden bg-brand-light text-brand-slate select-none">
       <Header isOffline={isOffline} />
@@ -160,6 +285,11 @@ export default function App() {
           onSelectVisitor={handleSelectVisitor}
           onRegisterAttendance={handleRegisterAttendance}
           onUndoAttendance={handleUndoAttendance}
+          onAuthenticate={handleAuthenticate}
+          isAuthenticating={isAuthenticating}
+          authMessage={authMessage}
+          onSelectFile={handleSelectFile}
+          onSyncWithDrive={handleSyncWithDrive}
         />
       </div>
 
@@ -171,6 +301,8 @@ export default function App() {
         onSeedMockData={handleSeedMockData}
         onClearDatabase={handleClearDatabase}
         onSimulateBarcodeScan={handleBarcodeScanned}
+        onSimulateGoogleAuth={handleSimulateGoogleAuth}
+        onSimulateExpiredToken={handleSimulateExpiredToken}
         defaultScanValue={mockData[0]?.visitorId ?? '12345678'}
       />
     </main>
