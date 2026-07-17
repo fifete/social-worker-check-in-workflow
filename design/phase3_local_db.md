@@ -17,16 +17,18 @@
 You must configure the native browser database engine inside a dedicated database layer using the lightweight `idb` library.
 
 1. Create a `src/db/` directory.
-2. Create `src/db/db.js`. Import `openDB` from `'idb'` and initialize a database named `'AsistenciaDB'` at version `1`.
-3. Inside the `upgrade(db)` callback, create two distinct object stores strictly matching the architecture specification:
+2. Create `src/db/db.js`. Import `openDB` from `'idb'` and initialize a database named `'AsistenciaDB'` at version `2`.
+3. Inside the `upgrade(db, oldVersion)` callback, create two distinct object stores strictly matching the architecture specification:
 
 
-* **Store 1: `visitorStore**`
+* **Store 1: `visitorStore`**
 
-* Define the primary key path: `{ keyPath: 'visitorId' }`.
+* Define the primary key path: `{ keyPath: 'recordId' }` — a composite string `"${visitorId}_${sheetRowIndex}"` that is unique per spreadsheet row. This allows the same visitor DNI (`visitorId`) to appear multiple times if they are registered to visit more than one adolescent.
 * Create secondary indexes for fast lookups:
-* `db.createIndex('by_name', 'visitorName', { unique: false })`
-* `db.createIndex('by_status', 'attendanceStatus', { unique: false })`
+  * `db.createIndex('by_visitor', 'visitorId', { unique: false })` — non-unique; used to fetch all records for a given DNI.
+  * `db.createIndex('by_name', 'visitorName', { unique: false })`
+  * `db.createIndex('by_status', 'attendanceStatus', { unique: false })`
+* **Migration note:** If upgrading from v1 (which used `visitorId` as `keyPath`), the old `visitorStore` must be deleted and recreated. Data loss is acceptable — the user re-imports from Drive.
 
 * **Store 2: `sessionStateStore**`
 * Define the primary key path: `{ keyPath: 'sessionId' }`.
@@ -41,26 +43,26 @@ Create a modular service layer to handle asynchronous database transactions with
 
 1. Create a `src/services/` directory.
 2. Create `src/services/visitorService.js` (or `.ts`) and implement the following asynchronous transaction functions:
-* **`seedMockVisitors(mockArray)`:** Clears `visitorStore` and performs a bulk read-write transaction to insert an array of mock visitor objects. Ensure each inserted record enforces the default system properties:
+* **`seedMockVisitors(mockArray)`:** Clears `visitorStore` and performs a bulk read-write transaction to insert an array of visitor objects using `store.put()` (upsert). Using `put` instead of `add` is required because the same visitor DNI can appear on multiple rows — `put` silently overwrites if `recordId` collides, while `add` would throw a `ConstraintError` and abort the entire transaction. Ensure each inserted record enforces the default system properties:
 
 
 ```javascript
 {
-  attendanceStatus: false, // Default[cite: 1]
-  attendanceTimestamp: null, // Default[cite: 1]
-  syncedWithCloud: false // Default[cite: 1]
+  attendanceStatus: false,
+  attendanceTimestamp: null,
+  syncedWithCloud: false
 }
 
 ```
 
 * **`getAllVisitors()`:** Returns all records currently stored in `visitorStore`.
-* **`getVisitorById(visitorId)`:** Performs a direct primary key lookup in `visitorStore`.
+* **`getVisitorsByDni(visitorId)`:** Uses the `by_visitor` index to return an **array** of all records whose `visitorId` matches the given DNI. Returns multiple records when the same person is registered to visit more than one adolescent.
 
 
-* **`registerAttendance(visitorId)`:** Opens a read-write transaction, fetches the record, mutates `attendanceStatus = true`, records the current ISO-8601 timestamp in `attendanceTimestamp`, sets `syncedWithCloud = false`, and writes the record back to `visitorStore`.
+* **`registerAttendance(recordId)`:** Opens a read-write transaction, fetches the record by `recordId` (the primary key), mutates `attendanceStatus = true`, records the current ISO-8601 timestamp in `attendanceTimestamp`, sets `syncedWithCloud = false`, and writes the record back to `visitorStore`.
 
 
-* **`undoAttendance(visitorId)`:** Reverses the check-in event by setting `attendanceStatus = false` and `attendanceTimestamp = null`.
+* **`undoAttendance(recordId)`:** Reverses the check-in event by fetching the record by `recordId` and setting `attendanceStatus = false` and `attendanceTimestamp = null`.
 
 
 * **`clearAllStores()`:** Executes a complete `.clear()` transaction across both `visitorStore` and `sessionStateStore`.
@@ -141,10 +143,10 @@ Wire the database services and search engine guardrails into the React component
 * If search status is `'OVERFLOW_WARNING'`, display the amber warning banner: **"⚠️ Demasiados resultados encontrados. Por favor, siga escribiendo para filtrar con mayor precisión."**.
 
 
-* If search status is `'SUCCESS'` and returns multiple items, render the scrollable mini-card list (`MULTI_MATCH`). Clicking a card must transition state to `CONFIRMED_MATCH` and load that specific visitor's record.
+* If search status is `'SUCCESS'` and returns multiple items, render the scrollable mini-card list (`MULTI_MATCH`). Each card must display `visitorName`, `visitorId` (DNI), and `hostName` ("Visita a: ...") so the social worker can distinguish the same visitor appearing for different adolescents. Clicking a card must transition state to `CONFIRMED_MATCH` and load that specific visitor's record.
 
 
-* In `CONFIRMED_MATCH`, wire the **"REGISTRAR ASISTENCIA"** button to execute `registerAttendance(id)`. On success, instantly update local state to render the gray badge (**"✓ ASISTENCIA REGISTRADA"**) and play a visual/textual confirmation. Wire **"Anular Registro"** to execute `undoAttendance(id)`.
+* In `CONFIRMED_MATCH`, wire the **"REGISTRAR ASISTENCIA"** button to execute `registerAttendance(selectedVisitor.recordId)`. On success, instantly update local state to render the gray badge (**"✓ ASISTENCIA REGISTRADA"**) and play a visual/textual confirmation. Wire **"Anular Registro"** to execute `undoAttendance(selectedVisitor.recordId)`. Both operations key on `recordId`, not `visitorId`.
 
 ---
 
@@ -178,7 +180,7 @@ root/
 Before reporting completion of Phase 3, execute the following terminal commands and interactive browser checks to verify strict compliance with the database architecture:
 
 1. `npm run dev` — Launch the application in Chrome.
-2. **Database Verification:** Open Chrome DevTools -> Application tab -> IndexedDB. Click **"🌱 Cargar Datos Mock"** in the developer bar. Confirm `AsistenciaDB` is created with `visitorStore` and `sessionStateStore`, and verify 20 records are populated in `visitorStore`.
+2. **Database Verification:** Open Chrome DevTools -> Application tab -> IndexedDB. Click **"🌱 Cargar Datos Mock"** in the developer bar. Confirm `AsistenciaDB` is created with `visitorStore` and `sessionStateStore`, and verify records are populated in `visitorStore` with `recordId` as the primary key (format: `"${visitorId}_${sheetRowIndex}"`). Confirm the `by_visitor` index is present.
 
 3. **Threshold Guardrail Check:** Type `"M"` then `"ME"` into the search bar. Verify no database results render and Zone 3 explicitly displays *"Escriba al menos 3 caracteres..."*.
 
@@ -189,6 +191,8 @@ Before reporting completion of Phase 3, execute the following terminal commands 
 
 * Click **"REGISTRAR ASISTENCIA"**. Verify the button switches to the attended badge.
 
-* Inspect DevTools -> IndexedDB -> `visitorStore`. Confirm the specific record now has `attendanceStatus: true`, a valid ISO-8601 string in `attendanceTimestamp`, and `syncedWithCloud: false`.
+* Inspect DevTools -> IndexedDB -> `visitorStore`. Confirm the specific record now has `attendanceStatus: true`, a valid ISO-8601 string in `attendanceTimestamp`, and `syncedWithCloud: false`. The record is identified by `recordId`, not `visitorId`.
 
 * Refresh the browser tab. Search for the same visitor again and verify their check-in status persisted across browser reloads.
+
+6. **Multi-record Visitor Check:** Scan or search a DNI that appears on more than one row (same visitor, different adolescents). Verify the app transitions to `MULTI_MATCH` showing both cards, each displaying the respective `hostName`. Selecting one card and registering attendance must only mark that specific `recordId` — the other record for the same DNI must remain unattended.

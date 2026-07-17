@@ -122,13 +122,14 @@ export default function Zone3Actions({
           <div className="flex-1 overflow-y-auto p-4 space-y-2">
             {searchResults.map((match) => (
               <button
-                key={match.visitorId}
+                key={match.recordId}
                 type="button"
                 onClick={() => onSelectVisitor?.(match)}
                 className="min-h-[56px] min-w-[56px] w-full cursor-pointer rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm"
               >
                 <div className="text-base font-bold text-brand-slate">{match.visitorName}</div>
-                <div className="text-sm font-medium text-brand-slate">{match.visitorId}</div>
+                <div className="text-sm font-medium text-brand-slate">DNI: {match.visitorId}</div>
+                <div className="text-sm font-semibold text-brand-emerald mt-1">Visita a: {match.hostName}</div>
               </button>
             ))}
           </div>
@@ -166,7 +167,7 @@ export default function Zone3Actions({
               {!selectedVisitor?.attendanceStatus ? (
                 <button
                   type="button"
-                  onClick={() => onRegisterAttendance?.(selectedVisitor?.visitorId)}
+                  onClick={() => onRegisterAttendance?.(selectedVisitor?.recordId)}
                   className="min-h-[56px] min-w-[56px] cursor-pointer rounded-2xl bg-brand-emerald px-4 py-3 text-base font-extrabold uppercase tracking-wide text-white"
                 >
                   REGISTRAR ASISTENCIA
@@ -178,7 +179,7 @@ export default function Zone3Actions({
                   </div>
                   <button
                     type="button"
-                    onClick={() => onUndoAttendance?.(selectedVisitor?.visitorId)}
+                    onClick={() => onUndoAttendance?.(selectedVisitor?.recordId)}
                     className="min-h-[56px] min-w-[56px] cursor-pointer rounded-2xl bg-transparent px-3 py-2 text-sm font-semibold text-brand-slate underline"
                   >
                     Anular Registro

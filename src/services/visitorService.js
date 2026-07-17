@@ -21,7 +21,7 @@ export async function seedMockVisitors(mockArray = []) {
   await store.clear();
 
   for (const visitor of mockArray) {
-    await store.add(withDefaults(visitor));
+    await store.put(withDefaults(visitor));
   }
 
   await tx.done;
@@ -35,22 +35,21 @@ export async function getAllVisitors() {
   return store.getAll();
 }
 
-export async function getVisitorById(visitorId) {
+export async function getVisitorsByDni(visitorId) {
   const db = await getDB();
   const tx = db.transaction(['visitorStore'], 'readonly');
   const store = tx.objectStore('visitorStore');
-
-  return store.get(visitorId);
+  return store.index('by_visitor').getAll(visitorId);
 }
 
-export async function registerAttendance(visitorId) {
+export async function registerAttendance(recordId) {
   const db = await getDB();
   const tx = db.transaction(['visitorStore'], 'readwrite');
   const store = tx.objectStore('visitorStore');
-  const visitor = await store.get(visitorId);
+  const visitor = await store.get(recordId);
 
   if (!visitor) {
-    throw new Error(`Visitor not found: ${visitorId}`);
+    throw new Error(`Visitor not found: ${recordId}`);
   }
 
   const updatedVisitor = {
@@ -66,14 +65,14 @@ export async function registerAttendance(visitorId) {
   return updatedVisitor;
 }
 
-export async function undoAttendance(visitorId) {
+export async function undoAttendance(recordId) {
   const db = await getDB();
   const tx = db.transaction(['visitorStore'], 'readwrite');
   const store = tx.objectStore('visitorStore');
-  const visitor = await store.get(visitorId);
+  const visitor = await store.get(recordId);
 
   if (!visitor) {
-    throw new Error(`Visitor not found: ${visitorId}`);
+    throw new Error(`Visitor not found: ${recordId}`);
   }
 
   const updatedVisitor = {

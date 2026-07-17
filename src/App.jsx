@@ -17,7 +17,7 @@ import { executeSearch } from './services/searchService';
 import {
   clearAllStores,
   getAllVisitors,
-  getVisitorById,
+  getVisitorsByDni,
   registerAttendance,
   seedMockVisitors,
   undoAttendance,
@@ -216,14 +216,24 @@ export default function App() {
     }
 
     try {
-      const matchedVisitor = await getVisitorById(normalizedIdentifier);
+      const matches = await getVisitorsByDni(normalizedIdentifier);
 
-      if (matchedVisitor) {
-        setSelectedVisitor(matchedVisitor);
+      if (matches.length === 1) {
+        setSelectedVisitor(matches[0]);
         setAppState('CONFIRMED_MATCH');
         return;
       }
 
+      if (matches.length > 1) {
+        setSearchQuery(normalizedIdentifier);
+        setSearchStatus('SUCCESS');
+        setSearchResults(matches);
+        setSearchMessage('');
+        setAppState('MULTI_MATCH');
+        return;
+      }
+
+      // No exact ID match — fall back to text search
       const searchResult = executeSearch(normalizedIdentifier, visitorList);
       setSearchQuery(normalizedIdentifier);
       setSearchStatus(searchResult.status);
@@ -236,12 +246,12 @@ export default function App() {
     }
   };
 
-  const handleRegisterAttendance = async (visitorId) => {
+  const handleRegisterAttendance = async (recordId) => {
     try {
-      const updatedVisitor = await registerAttendance(visitorId);
+      const updatedVisitor = await registerAttendance(recordId);
       setSelectedVisitor(updatedVisitor);
       setVisitorList((current) =>
-        current.map((visitor) => (visitor.visitorId === visitorId ? updatedVisitor : visitor)),
+        current.map((visitor) => (visitor.recordId === recordId ? updatedVisitor : visitor)),
       );
     } catch (error) {
       console.error(error);
@@ -249,12 +259,12 @@ export default function App() {
     }
   };
 
-  const handleUndoAttendance = async (visitorId) => {
+  const handleUndoAttendance = async (recordId) => {
     try {
-      const updatedVisitor = await undoAttendance(visitorId);
+      const updatedVisitor = await undoAttendance(recordId);
       setSelectedVisitor(updatedVisitor);
       setVisitorList((current) =>
-        current.map((visitor) => (visitor.visitorId === visitorId ? updatedVisitor : visitor)),
+        current.map((visitor) => (visitor.recordId === recordId ? updatedVisitor : visitor)),
       );
     } catch (error) {
       console.error(error);
@@ -324,8 +334,30 @@ export default function App() {
   const handleSimulateDriveDownload = async () => {
     try {
       const mockRows = [
-        ['visitorId', 'visitorName', 'hostName', 'relationship'],
-        ...mockData.map((v) => [v.visitorId, v.visitorName, v.hostName, v.relationship]),
+        [
+          'DOCUMENTO DE IDENTIDAD DEL VISITANTE',
+          'APELLIDOS Y NOMBRES COMPLETOS DEL VISITANTE (MAYÚSCULA)',
+          'APELLIDOS Y NOMBRES COMPLETOS DEL ADOLESCENTE (MAYÚSCULA)',
+          'DOCUMENTO DE IDENTIDAD DEL ADOLESCENTE',
+          'EDAD DEL VISITANTE',
+          'PARENTESCO CON EL ADOLESCENTE',
+          'TIPO DE VISITA',
+          'DEPARTAMENTO DE RESIDENCIA DEL VISITANTE',
+          'PROVINCIA DE RESIDENCIA DEL VISITANTE',
+          'DISTRITO DE RESIDENCIA DEL VISITANTE',
+        ],
+        ...mockData.map((v) => [
+          v.visitorId,
+          v.visitorName,
+          v.hostName,
+          v.hostId,
+          v.visitorAge,
+          v.relationship,
+          v.visitType,
+          v.visitorDept,
+          v.visitorProv,
+          v.visitorDist,
+        ]),
       ];
       await ingestRowsToIndexedDB(mockRows, 'mock_master_sheet_id', 'mock_cloned_sheet_id_999');
       await refreshVisitors();
