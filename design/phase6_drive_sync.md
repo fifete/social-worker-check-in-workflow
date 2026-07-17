@@ -8,6 +8,82 @@
 
 ---
 
+## Task 0: Token Lifecycle Management & Silent Refresh (`src/services/authService.js`)
+
+> **Why this task must run first:** Every subsequent task in Phase 6 calls Google APIs. All of them will silently fail after 60 minutes if token expiry is not handled before each network request. This task specifies the complete implementation of `getValidToken()` — the single choke-point through which all API calls must pass.
+
+### 0.1 — Token Persistence Schema
+
+When the user completes sign-in (Phase 5), you must persist **three** fields to the `'CURRENT_SESSION'` record in `sessionStateStore`, not just the access token:
+
+```javascript
+{
+  key: 'CURRENT_SESSION',
+  accessToken: response.access_token,       // Used for all Google API calls
+  refreshToken: response.refresh_token,     // Long-lived; used to silently renew access token
+  tokenIssuedAt: Date.now(),                // Unix ms timestamp — used to calculate token age
+  // ... existing fields (masterFileId, workingFileId, etc.)
+}
+```
+
+> **Critical:** If `response.refresh_token` is undefined (Google only returns it on the first authorization grant), retain the previously stored `refreshToken` value — do **not** overwrite it with `undefined`.
+
+### 0.2 — Implement `getValidToken()` with Silent Refresh
+
+In `src/services/authService.js`, implement `getValidToken()` as an `async` function that executes the following decision tree before every Google API call:
+
+```
+1. Read { accessToken, refreshToken, tokenIssuedAt } from sessionStateStore 'CURRENT_SESSION'
+2. If accessToken is null/undefined → return null (caller must trigger re-auth)
+3. Calculate age: const ageMs = Date.now() - tokenIssuedAt
+4. If ageMs < 50 * 60 * 1000 (50 minutes) → return accessToken immediately (still fresh)
+5. If ageMs >= 50 minutes AND refreshToken exists → execute silent refresh:
+     a. POST to https://oauth2.googleapis.com/token with:
+        { client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
+          grant_type: 'refresh_token',
+          refresh_token: refreshToken }
+     b. On HTTP 200: update sessionStateStore with new accessToken and reset tokenIssuedAt = Date.now()
+     c. Return the new accessToken
+     d. On HTTP 4xx (refresh token revoked/expired): clear accessToken and refreshToken from store, return null
+6. If refreshToken is null/undefined → return null (no recovery possible; caller triggers re-auth)
+```
+
+**Implementation rules:**
+* This function must be `async` and always `await` the IndexedDB read.
+* Do NOT use `setTimeout` or caching in memory — always read from IndexedDB so the token state survives page reloads.
+* The silent refresh POST must include `Content-Type: application/x-www-form-urlencoded` (not JSON) — this is a Google OAuth requirement.
+* Wrap the refresh POST in a `try/catch`. A network failure (device offline) must return `null` without throwing, so the caller can show the offline guardrail instead of a crash.
+
+### 0.3 — Implement `handleExpiredTokenReAuth(tokenClient)`
+
+In `src/services/authService.js`, implement `handleExpiredTokenReAuth(tokenClient)`:
+
+* Call `tokenClient.requestAccessToken({ prompt: 'none' })` to attempt a silent re-authorization first (no popup if the Google session cookie is still valid).
+* If the silent attempt fails (listen for `error_callback` on the `tokenClient`), fall back to `tokenClient.requestAccessToken({ prompt: 'consent' })` to show the interactive sign-in modal.
+* After a successful token response, persist the new `accessToken`, `refreshToken`, and reset `tokenIssuedAt` in `sessionStateStore` (reuse the same persistence logic from §0.1).
+
+### 0.4 — Update All Callers to Use `getValidToken()`
+
+Apply the following signature changes so that no service hardcodes a token received at startup:
+
+| Service | Old signature | New signature |
+|---|---|---|
+| `pickerService.js` | `openSpreadsheetPicker(authToken, ...)` | `openSpreadsheetPicker(onFileSelected, onError)` — calls `getValidToken()` internally at invocation time |
+| `driveService.js` | `cloneMasterSpreadsheet(authToken, ...)` | `cloneMasterSpreadsheet(masterFileId, masterFileName)` — calls `getValidToken()` at the top of the function |
+| `driveService.js` | `fetchSpreadsheetData(authToken, ...)` | `fetchSpreadsheetData(workingFileId, range)` — calls `getValidToken()` at the top of the function |
+| `syncService.js` | Already calls `getValidToken()` in Step 2 | No change needed — but move the call to **before** Step 3, not after the pending-record filter |
+
+In each updated function, the first executable line after parameter validation must be:
+```javascript
+const token = await getValidToken();
+if (!token) {
+  // surface AUTH_REQUIRED to the caller; do not proceed with the API call
+  return { status: 'AUTH_REQUIRED', message: 'Sesión expirada. Confirme su cuenta.' };
+}
+```
+
+---
+
 ## Task 1: Google Picker API & Spreadsheet Selection (`src/services/pickerService.js`)
 
 You must configure the Google Picker API to provide a secure, visual file browser restricted strictly to spreadsheet formats.
@@ -212,7 +288,7 @@ root/
 │   │   └── Zone3Actions.jsx       <-- MODIFIED: Wired real Picker execution & Sync trigger with offline guardrail
 │   ├── db/
 │   ├── services/
-│   │   ├── authService.js
+│   │   ├── authService.js         <-- MODIFIED: getValidToken() with silent refresh + handleExpiredTokenReAuth()
 │   │   ├── driveService.js        <-- NEW: Drive v3 cloning (_ASISTENCIA) & Sheets v4 row ingestion
 │   │   ├── pickerService.js       <-- NEW: Google Picker API DocsView loader & modal builder
 │   │   ├── scannerService.js

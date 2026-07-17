@@ -13,7 +13,11 @@ export default function Zone3Actions({
   isAuthenticating = false,
   authMessage = '',
   onSelectFile,
+  isPickerLoading = false,
   onSyncWithDrive,
+  isOffline = false,
+  isSyncing = false,
+  syncMessage = '',
 }) {
   const resolvedState = useMemo(() => {
     if (searchStatus === 'THRESHOLD_WARNING' || searchStatus === 'OVERFLOW_WARNING') {
@@ -73,10 +77,11 @@ export default function Zone3Actions({
           <div className="flex flex-1 items-center justify-center p-4">
             <button
               type="button"
-              onClick={() => onSelectFile?.()}
-              className="min-h-[56px] min-w-[56px] cursor-pointer rounded-2xl bg-brand-slate px-6 py-4 text-base font-bold uppercase tracking-wide text-white shadow-sm"
+              onClick={() => !isPickerLoading && onSelectFile?.()}
+              disabled={isPickerLoading}
+              className="min-h-[56px] min-w-[56px] cursor-pointer rounded-2xl bg-brand-slate px-6 py-4 text-base font-bold uppercase tracking-wide text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-70"
             >
-              SELECCIONAR EXCEL DE DRIVE
+              {isPickerLoading ? 'Clonando archivo y procesando registros...' : 'SELECCIONAR EXCEL DE DRIVE'}
             </button>
           </div>
         );
@@ -89,11 +94,26 @@ export default function Zone3Actions({
             </p>
             <button
               type="button"
-              onClick={() => onSyncWithDrive?.()}
-              className="min-h-[56px] min-w-[56px] w-full cursor-pointer rounded-2xl bg-gray-200 px-4 py-3 text-sm font-semibold text-brand-slate"
+              onClick={() => !isOffline && !isSyncing && onSyncWithDrive?.()}
+              disabled={isOffline || isSyncing}
+              className={`min-h-[56px] min-w-[56px] w-full rounded-2xl px-4 py-3 text-sm font-semibold ${
+                isOffline
+                  ? 'cursor-not-allowed bg-gray-300 text-gray-500 opacity-50'
+                  : isSyncing
+                    ? 'cursor-not-allowed bg-gray-200 text-brand-slate opacity-70'
+                    : 'cursor-pointer bg-gray-200 text-brand-slate'
+              }`}
             >
-              Sincronizar Datos con Drive
+              {isSyncing ? 'Sincronizando con Drive...' : 'Sincronizar Datos con Drive'}
             </button>
+            {isOffline && (
+              <p className="mt-3 text-sm font-bold text-amber-600">
+                ⚠️ No se puede sincronizar en Modo Local. Conéctese a internet para enviar los registros.
+              </p>
+            )}
+            {!isOffline && syncMessage && !isSyncing && (
+              <p className="mt-3 text-sm font-semibold text-brand-slate">{syncMessage}</p>
+            )}
           </div>
         );
 
@@ -172,7 +192,7 @@ export default function Zone3Actions({
       default:
         return null;
     }
-  }, [authMessage, isAuthenticating, onAuthenticate, onRegisterAttendance, onSelectVisitor, onUndoAttendance, resolvedState, searchMessage, searchStatus, searchResults, selectedVisitor]);
+  }, [authMessage, isAuthenticating, isOffline, isPickerLoading, isSyncing, onAuthenticate, onRegisterAttendance, onSelectFile, onSelectVisitor, onSyncWithDrive, onUndoAttendance, resolvedState, searchMessage, searchStatus, searchResults, selectedVisitor, syncMessage]);
 
   return <div className="flex h-full flex-col bg-brand-light">{stateContent}</div>;
 }

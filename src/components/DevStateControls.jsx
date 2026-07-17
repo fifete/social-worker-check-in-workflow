@@ -10,6 +10,8 @@ export default function DevStateControls({
   onSimulateBarcodeScan,
   onSimulateGoogleAuth,
   onSimulateExpiredToken,
+  onSimulateDriveDownload,
+  onSimulateSyncBatch,
   defaultScanValue = '12345678',
 }) {
   const handleSimulateBarcodeScan = () => {
@@ -77,6 +79,22 @@ export default function DevStateControls({
           className="min-h-[56px] rounded-xl bg-brand-amber px-3 py-2 text-xs font-semibold uppercase tracking-wide text-white"
         >
           ⏳ Simular Token Expirado
+        </button>
+
+        <button
+          type="button"
+          onClick={onSimulateDriveDownload}
+          className="min-h-[56px] rounded-xl bg-brand-blue px-3 py-2 text-xs font-semibold uppercase tracking-wide text-white"
+        >
+          ☁️ Simular Descarga Drive
+        </button>
+
+        <button
+          type="button"
+          onClick={onSimulateSyncBatch}
+          className="min-h-[56px] rounded-xl bg-brand-blue px-3 py-2 text-xs font-semibold uppercase tracking-wide text-white"
+        >
+          🔄 Simular Sync Batch
         </button>
 
         <button

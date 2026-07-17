@@ -1,9 +1,10 @@
 import { getDB } from '../db/db.js';
 
 const GOOGLE_IDENTITY_SCRIPT_URL = 'https://accounts.google.com/gsi/client';
-const TOKEN_EXPIRATION_THRESHOLD_MS = 3_500_000;
+// Trigger silent refresh when the token is 50 minutes old (10-minute safety buffer before the 1-hour Google hard limit)
+const SILENT_REFRESH_THRESHOLD_MS = 50 * 60 * 1000;
 export const SCOPES = [
-  'https://www.googleapis.com/auth/drive.file',
+  'https://www.googleapis.com/auth/drive',
   'https://www.googleapis.com/auth/spreadsheets',
 ].join(' ');
 
@@ -50,9 +51,17 @@ export function initTokenClient(onAuthSuccess, onAuthError) {
     throw new Error('Google Identity Services token client is not available.');
   }
 
-  return window.google.accounts.oauth2.initTokenClient({
+  let client;
+  client = window.google.accounts.oauth2.initTokenClient({
     client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
     scope: SCOPES,
+    // If a silent re-auth attempt (prompt: 'none') fails because interaction is required,
+    // automatically fall back to an interactive consent dialog.
+    error_callback: (error) => {
+      if (error?.type !== 'popup_closed') {
+        client.requestAccessToken({ prompt: 'consent' });
+      }
+    },
     callback: async (response) => {
       if (response?.error) {
         onAuthError?.(response);
@@ -67,6 +76,7 @@ export function initTokenClient(onAuthSuccess, onAuthError) {
       }
     },
   });
+  return client;
 }
 
 export async function saveSessionToken(tokenResponse) {
@@ -79,12 +89,19 @@ export async function saveSessionToken(tokenResponse) {
   const db = await getDB();
   const tx = db.transaction(['sessionStateStore'], 'readwrite');
   const store = tx.objectStore('sessionStateStore');
+
+  // Read the existing record so we can preserve workingFileId, masterFileId,
+  // and any previously stored refreshToken (Google only sends it on the first grant).
+  const existing = await store.get('CURRENT_SESSION');
+
   const sessionRecord = {
+    ...(existing ?? {}),
     sessionId: 'CURRENT_SESSION',
-    authToken: accessToken,
-    tokenAcquisitionTime: Date.now(),
-    workingFileId: null,
-    masterFileId: null,
+    accessToken,
+    refreshToken: tokenResponse.refresh_token ?? existing?.refreshToken ?? null,
+    tokenIssuedAt: Date.now(),
+    workingFileId: existing?.workingFileId ?? null,
+    masterFileId: existing?.masterFileId ?? null,
   };
 
   await store.put(sessionRecord);
@@ -95,20 +112,62 @@ export async function saveSessionToken(tokenResponse) {
 
 export async function getValidToken() {
   const db = await getDB();
-  const tx = db.transaction(['sessionStateStore'], 'readonly');
-  const store = tx.objectStore('sessionStateStore');
-  const sessionRecord = await store.get('CURRENT_SESSION');
+  const session = await db
+    .transaction(['sessionStateStore'], 'readonly')
+    .objectStore('sessionStateStore')
+    .get('CURRENT_SESSION');
 
-  if (!sessionRecord?.authToken) {
+  if (!session?.accessToken) {
     return null;
   }
 
-  const elapsedTimeMs = Date.now() - (sessionRecord.tokenAcquisitionTime ?? 0);
+  const ageMs = Date.now() - (session.tokenIssuedAt ?? 0);
 
-  if (elapsedTimeMs < TOKEN_EXPIRATION_THRESHOLD_MS) {
-    return sessionRecord.authToken;
+  // Token is fresh — return immediately without a network call
+  if (ageMs < SILENT_REFRESH_THRESHOLD_MS) {
+    return session.accessToken;
   }
 
+  // Token is stale — attempt a silent refresh using the stored refresh token
+  if (session.refreshToken) {
+    try {
+      const params = new URLSearchParams({
+        client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
+        grant_type: 'refresh_token',
+        refresh_token: session.refreshToken,
+      });
+
+      const response = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params.toString(),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        await saveSessionToken(data);
+        return data.access_token;
+      }
+
+      // 4xx means the refresh token itself is revoked or expired — clear credentials
+      if (response.status >= 400 && response.status < 500) {
+        const clearTx = db.transaction(['sessionStateStore'], 'readwrite');
+        const clearStore = clearTx.objectStore('sessionStateStore');
+        const stale = await clearStore.get('CURRENT_SESSION');
+        if (stale) {
+          await clearStore.put({ ...stale, accessToken: null, refreshToken: null });
+        }
+        await clearTx.done;
+      }
+    } catch {
+      // Network failure (device offline) — return null so the caller
+      // shows the offline guardrail instead of crashing
+    }
+
+    return null;
+  }
+
+  // No refresh token available — caller must trigger interactive re-auth
   return null;
 }
 
@@ -127,7 +186,10 @@ export function handleExpiredTokenReAuth(tokenClient) {
     throw new Error('Google token client is not available.');
   }
 
-  tokenClient.requestAccessToken({ prompt: '' });
+  // Attempt silent re-auth first (no popup if the Google session cookie is still valid).
+  // If interaction is required, the error_callback configured in initTokenClient will
+  // automatically fall back to requestAccessToken({ prompt: 'consent' }).
+  tokenClient.requestAccessToken({ prompt: 'none' });
 
   return {
     shouldReauthenticate: true,

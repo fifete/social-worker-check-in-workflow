@@ -22,6 +22,13 @@ import {
   seedMockVisitors,
   undoAttendance,
 } from './services/visitorService';
+import { openSpreadsheetPicker } from './services/pickerService';
+import {
+  cloneMasterSpreadsheet,
+  fetchSpreadsheetData,
+  ingestRowsToIndexedDB,
+} from './services/driveService';
+import { executeBatchSync } from './services/syncService';
 
 export default function App() {
   const [appState, setAppState] = useState('READY_EMPTY');
@@ -35,6 +42,9 @@ export default function App() {
   const [tokenClient, setTokenClient] = useState(null);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [authMessage, setAuthMessage] = useState('');
+  const [isPickerLoading, setIsPickerLoading] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState('');
 
   const isAuthPhase = appState === 'AUTH_PENDING' || appState === 'FILE_PICKER_PENDING';
 
@@ -179,7 +189,8 @@ export default function App() {
       if (sessionRecord) {
         await store.put({
           ...sessionRecord,
-          tokenAcquisitionTime: Date.now() - 7_200_000,
+          tokenIssuedAt: Date.now() - 7_200_000,
+          refreshToken: null,
         });
       }
 
@@ -251,14 +262,108 @@ export default function App() {
     }
   };
 
-  // Phase 6: Google Picker will open here to select the master spreadsheet from Drive.
-  const handleSelectFile = () => {
-    console.warn('handleSelectFile: Google Picker not yet implemented (Phase 6).');
+  // Phase 6: Google Picker opens to select the master spreadsheet, clone it, and ingest rows.
+  const handleSelectFile = async () => {
+    setIsPickerLoading(true);
+
+    await openSpreadsheetPicker(
+      async ({ id: masterFileId, name: masterFileName }) => {
+        try {
+          const workingFileId = await cloneMasterSpreadsheet(masterFileId, masterFileName);
+
+          if (workingFileId?.status === 'AUTH_REQUIRED') {
+            setIsPickerLoading(false);
+            setAppState('AUTH_PENDING');
+            return;
+          }
+
+          const rows = await fetchSpreadsheetData(workingFileId);
+          await ingestRowsToIndexedDB(rows, masterFileId, workingFileId);
+          await refreshVisitors();
+        } catch (error) {
+          console.error(error);
+          alert(`Error al procesar el archivo: ${error.message}`);
+        } finally {
+          setIsPickerLoading(false);
+        }
+      },
+      (error) => {
+        console.error(error);
+        setIsPickerLoading(false);
+        if (error?.status === 'AUTH_REQUIRED') {
+          setAppState('AUTH_PENDING');
+        } else {
+          alert('No se pudo abrir el selector de archivos.');
+        }
+      },
+    );
   };
 
-  // Phase 6: Batch sync of attendance records to the working Drive copy.
-  const handleSyncWithDrive = () => {
-    console.warn('handleSyncWithDrive: Drive batch sync not yet implemented (Phase 6).');
+  // Phase 6: Batch sync of attendance records to the cloned Drive file.
+  const handleSyncWithDrive = async () => {
+    if (isOffline || isSyncing) return;
+
+    try {
+      setIsSyncing(true);
+      setSyncMessage('');
+      const result = await executeBatchSync(tokenClient);
+      setSyncMessage(result.message);
+
+      if (result.status === 'AUTH_REQUIRED') {
+        setAppState('AUTH_PENDING');
+      }
+    } catch (error) {
+      console.error(error);
+      setSyncMessage('Error al sincronizar. Inténtelo nuevamente.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Dev simulation: bypass Picker, seed mock data, and jump to READY_EMPTY.
+  const handleSimulateDriveDownload = async () => {
+    try {
+      const mockRows = [
+        ['visitorId', 'visitorName', 'hostName', 'relationship'],
+        ...mockData.map((v) => [v.visitorId, v.visitorName, v.hostName, v.relationship]),
+      ];
+      await ingestRowsToIndexedDB(mockRows, 'mock_master_sheet_id', 'mock_cloned_sheet_id_999');
+      await refreshVisitors();
+    } catch (error) {
+      console.error(error);
+      alert('No se pudo simular la descarga de Drive');
+    }
+  };
+
+  // Dev simulation: mark all unsynced check-ins as synced without a real network call.
+  const handleSimulateSyncBatch = async () => {
+    try {
+      const allVisitors = await getAllVisitors();
+      const pending = allVisitors.filter(
+        (v) => v.attendanceStatus === true && v.syncedWithCloud === false,
+      );
+
+      if (pending.length === 0) {
+        alert('Simulación: No hay registros pendientes de sincronizar.');
+        return;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+
+      const db = await getDB();
+      const tx = db.transaction(['visitorStore'], 'readwrite');
+      const store = tx.objectStore('visitorStore');
+
+      for (const record of pending) {
+        await store.put({ ...record, syncedWithCloud: true });
+      }
+
+      await tx.done;
+      alert(`Simulación: ${pending.length} registros marcados como sincronizados.`);
+    } catch (error) {
+      console.error(error);
+      alert('No se pudo simular la sincronización');
+    }
   };
 
   return (
@@ -289,7 +394,11 @@ export default function App() {
           isAuthenticating={isAuthenticating}
           authMessage={authMessage}
           onSelectFile={handleSelectFile}
+          isPickerLoading={isPickerLoading}
           onSyncWithDrive={handleSyncWithDrive}
+          isOffline={isOffline}
+          isSyncing={isSyncing}
+          syncMessage={syncMessage}
         />
       </div>
 
@@ -303,6 +412,8 @@ export default function App() {
         onSimulateBarcodeScan={handleBarcodeScanned}
         onSimulateGoogleAuth={handleSimulateGoogleAuth}
         onSimulateExpiredToken={handleSimulateExpiredToken}
+        onSimulateDriveDownload={handleSimulateDriveDownload}
+        onSimulateSyncBatch={handleSimulateSyncBatch}
         defaultScanValue={mockData[0]?.visitorId ?? '12345678'}
       />
     </main>
