@@ -408,7 +408,10 @@ export default function App() {
 
       <Zone2Search
         isDisabled={isAuthPhase}
-        onSearchChange={setSearchQuery}
+        onSearchChange={(query) => {
+          setSearchQuery(query);
+          setSelectedVisitor(null);
+        }}
         searchValue={searchQuery}
       />
 

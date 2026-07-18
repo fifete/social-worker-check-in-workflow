@@ -119,7 +119,7 @@ export default function Zone3Actions({
 
       case 'MULTI_MATCH':
         return (
-          <div className="flex-1 overflow-y-auto p-4 space-y-2">
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-2">
             {searchResults.map((match) => (
               <button
                 key={match.recordId}
