@@ -10,10 +10,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@xstate/react": "^5.0.5",
     "@zxing/library": "0.21.3",
     "idb": "8.0.3",
     "react": "19.2.7",
-    "react-dom": "19.2.7"
+    "react-dom": "19.2.7",
+    "xstate": "^5.32.5"
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.3.2",

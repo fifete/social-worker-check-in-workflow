@@ -1,39 +1,45 @@
 import { openDB } from 'idb';
 
-const DB_NAME = 'AsistenciaDB';
-const DB_VERSION = 2;
+const DB_NAME = 'checkInDB';
+const DB_VERSION = 1;
 
-let dbPromise = null;
+let _db = null;
 
-export function getDB() {
-  if (!dbPromise) {
-    dbPromise = openDB(DB_NAME, DB_VERSION, {
-      upgrade(db, oldVersion) {
-        // v1 used visitorId as keyPath; v2 uses recordId to allow the same
-        // visitor (same DNI) to appear multiple times for different adolescents.
-        if (oldVersion < 2 && db.objectStoreNames.contains('visitorStore')) {
-          db.deleteObjectStore('visitorStore');
-        }
+/**
+ * Opens (or creates) checkInDB. Rejects with { code: 'DB_OPEN_BLOCKED' } or
+ * { code: 'DB_OPEN_FAILED' } on error. Must be called once before any service function.
+ * @returns {Promise<import('idb').IDBPDatabase>}
+ */
+export function openDatabase() {
+  if (_db) return Promise.resolve(_db);
 
+  return new Promise((resolve, reject) => {
+    let wasBlocked = false;
+
+    openDB(DB_NAME, DB_VERSION, {
+      upgrade(db) {
         if (!db.objectStoreNames.contains('visitorStore')) {
-          const visitorStore = db.createObjectStore('visitorStore', {
-            keyPath: 'recordId',
-          });
-          visitorStore.createIndex('by_visitor', 'visitorId', { unique: false });
-          visitorStore.createIndex('by_name', 'visitorName', { unique: false });
-          visitorStore.createIndex('by_status', 'attendanceStatus', { unique: false });
+          db.createObjectStore('visitorStore', { keyPath: 'visitorId' });
         }
-
         if (!db.objectStoreNames.contains('sessionStateStore')) {
-          db.createObjectStore('sessionStateStore', {
-            keyPath: 'sessionId',
-          });
+          db.createObjectStore('sessionStateStore', { keyPath: 'sessionId' });
         }
       },
-    });
-  }
-
-  return dbPromise;
+      blocked() {
+        wasBlocked = true;
+        reject({ code: 'DB_OPEN_BLOCKED' });
+      },
+    })
+      .then((db) => {
+        if (!wasBlocked) {
+          _db = db;
+          resolve(db);
+        }
+      })
+      .catch(() => {
+        if (!wasBlocked) {
+          reject({ code: 'DB_OPEN_FAILED' });
+        }
+      });
+  });
 }
-
-export default getDB;

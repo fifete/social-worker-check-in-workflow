@@ -1,128 +1,140 @@
-import { getValidToken, handleExpiredTokenReAuth } from './authService.js';
-import { getAllVisitors } from './visitorService.js';
-import { getDB } from '../db/db.js';
-import { indexToColumnLetter } from './driveService.js';
+import * as authService    from './authService.js';
+import * as driveService   from './driveService.js';
+import * as visitorService from './visitorService.js';
 
-const TAB_NAME = "'Respuestas de formulario 1'";
+// Error code → Spanish user message mapping (from syncService.md)
+const DRIVE_ERROR_MESSAGES = {
+  BATCH_UNAUTHORIZED: 'Sesión expirada. Intente sincronizar de nuevo.',
+  BATCH_FORBIDDEN:    'Sin permiso para escribir en el archivo. Verifique el acceso.',
+  BATCH_RATE_LIMITED: 'Demasiadas solicitudes. Espere un momento e intente de nuevo.',
+  BATCH_SERVER_ERROR: 'Error del servidor. Intente de nuevo más tarde.',
+  BATCH_NETWORK_ERROR:'Sin conexión. Verifique su red e intente de nuevo.',
+  BATCH_API_ERROR:    'Error al sincronizar. Intente de nuevo más tarde.',
+  NO_TOKEN:           'No hay sesión activa. Inicie sesión e intente de nuevo.',
+};
 
-export async function executeBatchSync(tokenClient) {
-  // Step 1: Query pending records
-  const allVisitors = await getAllVisitors();
-  const pendingRecords = allVisitors.filter(
-    (record) => record.attendanceStatus === true && record.syncedWithCloud === false,
-  );
+const REAUTH_MESSAGES = {
+  REAUTH_CANCELLED:     'La sesión no pudo renovarse. Reconecte e intente sincronizar de nuevo.',
+  REAUTH_FAILED:        'Error al renovar la sesión. Intente de nuevo.',
+  SESSION_WRITE_FAILED: 'Error al guardar la sesión renovada. Intente de nuevo.',
+};
 
-  if (pendingRecords.length === 0) {
-    return { status: 'UP_TO_DATE', count: 0, message: 'Todos los registros están sincronizados.' };
-  }
+/**
+ * Executes the full Phase 3 sync sequence.
+ *
+ * @returns {Promise<
+ *   { status: 'SUCCESS' } |
+ *   { status: 'NO_PENDING_RECORDS' } |
+ *   { status: 'ERROR'; code: string; message: string }
+ * >}
+ */
+export async function runSync() {
+  // Step 1 — Check token validity
+  const tokenValid = await authService.isTokenValid();
 
-  // Step 2: Token health check
-  const token = await getValidToken();
+  // Step 2 — Re-authenticate if expired
+  if (!tokenValid) {
+    try {
+      await authService.reAuthenticate();
+    } catch (err) {
+      const code    = err?.code ?? 'REAUTH_FAILED';
+      const syncCode =
+        code === 'AUTH_CANCELLED'      ? 'REAUTH_CANCELLED'
+        : code === 'SESSION_WRITE_FAILED' ? 'SESSION_WRITE_FAILED'
+        : 'REAUTH_FAILED';
 
-  if (!token) {
-    handleExpiredTokenReAuth(tokenClient);
-    return {
-      status: 'AUTH_REQUIRED',
-      message: 'Sesión expirada. Confirme su cuenta para sincronizar.',
-    };
-  }
-
-  // Step 3: Resolve target working file
-  const db = await getDB();
-  const sessionRecord = await db
-    .transaction(['sessionStateStore'], 'readonly')
-    .objectStore('sessionStateStore')
-    .get('CURRENT_SESSION');
-
-  const workingFileId = sessionRecord?.workingFileId;
-
-  if (!workingFileId) {
-    throw new Error('Error crítico: No se encontró el archivo de trabajo clonado.');
-  }
-
-  // Step 4: Fetch first few rows to locate the header row containing ASISTENCIA
-  // (the spreadsheet may have a banner/title row before the actual header row)
-  const headerRange = encodeURIComponent(`${TAB_NAME}!1:5`);
-  const headerResponse = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(workingFileId)}/values/${headerRange}`,
-    { headers: { Authorization: `Bearer ${token}` } },
-  );
-
-  if (!headerResponse.ok) {
-    const errorBody = await headerResponse.json().catch(() => ({}));
-    throw new Error(
-      errorBody.error?.message ?? `No se pudo leer el encabezado: ${headerResponse.status}`,
-    );
-  }
-
-  const headerData = await headerResponse.json();
-  const topRows = headerData.values ?? [];
-
-  let asistenciaColIndex = -1;
-  for (const row of topRows) {
-    const upper = row.map((h) => String(h).trim().toUpperCase());
-    const idx = upper.indexOf('ASISTENCIA');
-    if (idx !== -1) {
-      asistenciaColIndex = idx;
-      break;
+      return {
+        status:  'ERROR',
+        code:    syncCode,
+        message: REAUTH_MESSAGES[syncCode] ?? REAUTH_MESSAGES.REAUTH_FAILED,
+      };
     }
   }
 
-  if (asistenciaColIndex === -1) {
-    throw new Error('Columna ASISTENCIA no encontrada en la hoja de trabajo.');
-  }
-
-  const asistenciaColLetter = indexToColumnLetter(asistenciaColIndex);
-
-  // Step 5: Build batchUpdate payload — update ASISTENCIA cell for each attended row
-  const validRecords = pendingRecords.filter((r) => r.sheetRowIndex != null);
-
-  if (validRecords.length === 0) {
+  // Step 3 — Collect pending records
+  let pending;
+  try {
+    pending = await visitorService.getPendingSyncRecords();
+  } catch {
     return {
-      status: 'UP_TO_DATE',
-      count: 0,
-      message: 'Los registros no contienen índice de fila. Reimporte el archivo.',
+      status:  'ERROR',
+      code:    'PENDING_QUERY_FAILED',
+      message: 'Error al leer los registros pendientes. Intente de nuevo.',
     };
   }
 
-  const batchData = validRecords.map((record) => ({
-    range: `${TAB_NAME}!${asistenciaColLetter}${record.sheetRowIndex}`,
-    values: [['TRUE']],
+  if (pending.length === 0) {
+    return { status: 'NO_PENDING_RECORDS' };
+  }
+
+  // Step 4 — Read working file ID and column letter
+  let session;
+  try {
+    session = await visitorService.readSession();
+  } catch {
+    session = null;
+  }
+
+  if (!session?.workingFileId) {
+    return {
+      status:  'ERROR',
+      code:    'NO_WORKING_FILE',
+      message: 'No se encontró el archivo de trabajo. Vuelva a configurar el evento.',
+    };
+  }
+
+  if (!session?.asistenciaColumn) {
+    return {
+      status:  'ERROR',
+      code:    'NO_ASISTENCIA_COLUMN',
+      message: 'No se encontró la columna de asistencia. Vuelva a cargar los datos.',
+    };
+  }
+
+  const { workingFileId, asistenciaColumn } = session;
+
+  // Step 5 — Build update payload
+  const updates = pending.map((record) => ({
+    rowIndex:     record.rowIndex,
+    columnLetter: asistenciaColumn,
   }));
 
-  // Step 6: Execute batchUpdate
-  const batchResponse = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(workingFileId)}/values:batchUpdate`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ valueInputOption: 'RAW', data: batchData }),
-    },
-  );
+  // Step 6 — Push to Drive
+  try {
+    await driveService.batchUpdateAttendance(workingFileId, updates);
+  } catch (err) {
+    const driveCode = err?.code ?? 'BATCH_API_ERROR';
+    const syncCode  =
+      driveCode === 'BATCH_UNAUTHORIZED' ? 'SYNC_UNAUTHORIZED'
+      : driveCode === 'BATCH_FORBIDDEN'  ? 'SYNC_FORBIDDEN'
+      : driveCode === 'BATCH_RATE_LIMITED' ? 'SYNC_RATE_LIMITED'
+      : driveCode === 'BATCH_SERVER_ERROR' ? 'SYNC_SERVER_ERROR'
+      : driveCode === 'BATCH_NETWORK_ERROR' ? 'SYNC_NETWORK_ERROR'
+      : driveCode === 'NO_TOKEN'           ? 'SYNC_NO_TOKEN'
+      : 'SYNC_API_ERROR';
 
-  if (!batchResponse.ok) {
-    const errorBody = await batchResponse.json().catch(() => ({}));
-    throw new Error(
-      errorBody.error?.message ?? `Sheets sync failed with status ${batchResponse.status}`,
-    );
+    return {
+      status:  'ERROR',
+      code:    syncCode,
+      message: DRIVE_ERROR_MESSAGES[driveCode] ?? DRIVE_ERROR_MESSAGES.BATCH_API_ERROR,
+    };
   }
 
-  // Step 7: Mark records as synced locally
-  const writeTx = db.transaction(['visitorStore'], 'readwrite');
-  const visitorStore = writeTx.objectStore('visitorStore');
-
-  for (const record of validRecords) {
-    await visitorStore.put({ ...record, syncedWithCloud: true });
+  // Step 7 — Purge stores (only after confirmed HTTP 200)
+  try {
+    await Promise.all([
+      visitorService.clearVisitorStore(),
+      visitorService.clearSessionStore(),
+    ]);
+  } catch (err) {
+    console.error('[syncService] Purge failed after successful Drive push:', err);
+    return {
+      status:  'ERROR',
+      code:    'PURGE_FAILED',
+      message: 'Sync successful but local data could not be cleared.',
+    };
   }
 
-  await writeTx.done;
-
-  return {
-    status: 'SUCCESS',
-    count: validRecords.length,
-    message: `Se sincronizaron ${validRecords.length} registros con Google Drive.`,
-  };
+  // Step 8 — Success
+  return { status: 'SUCCESS' };
 }

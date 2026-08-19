@@ -1,198 +1,137 @@
-import { getDB } from '../db/db.js';
+import * as visitorService from './visitorService.js';
 
-const GOOGLE_IDENTITY_SCRIPT_URL = 'https://accounts.google.com/gsi/client';
-// Trigger silent refresh when the token is 50 minutes old (10-minute safety buffer before the 1-hour Google hard limit)
-const SILENT_REFRESH_THRESHOLD_MS = 50 * 60 * 1000;
-export const SCOPES = [
-  'https://www.googleapis.com/auth/drive',
-  'https://www.googleapis.com/auth/spreadsheets',
-].join(' ');
+export const TOKEN_EXPIRY_MS    = 3_600_000; // Google hard expiry (1 hour)
+export const TOKEN_SAFE_WINDOW_MS = 3_000_000; // 50-minute safety threshold
 
-let googleIdentityScriptPromise = null;
+let tokenClient = null;
 
-export function loadGoogleIdentityScript() {
-  if (typeof window === 'undefined' || typeof document === 'undefined') {
-    return Promise.reject(new Error('Google Identity Services can only be loaded in the browser.'));
-  }
+// Pending sign-in promise handles — resolved/rejected from handleTokenResponse
+let _resolveSignIn = null;
+let _rejectSignIn  = null;
 
-  if (window.google?.accounts?.oauth2) {
-    return Promise.resolve(window.google);
-  }
-
-  if (!googleIdentityScriptPromise) {
-    googleIdentityScriptPromise = new Promise((resolve, reject) => {
-      const existingScript = document.querySelector(`script[src="${GOOGLE_IDENTITY_SCRIPT_URL}"]`);
-
-      if (existingScript) {
-        existingScript.addEventListener('load', () => resolve(window.google), { once: true });
-        existingScript.addEventListener('error', () => {
-          reject(new Error('Failed to load Google Identity Services script.'));
-        }, { once: true });
-        return;
-      }
-
-      const script = document.createElement('script');
-      script.src = GOOGLE_IDENTITY_SCRIPT_URL;
-      script.async = true;
-      script.defer = true;
-
-      script.onload = () => resolve(window.google);
-      script.onerror = () => reject(new Error('Failed to load Google Identity Services script.'));
-
-      document.head.appendChild(script);
-    });
-  }
-
-  return googleIdentityScriptPromise;
-}
-
-export function initTokenClient(onAuthSuccess, onAuthError) {
-  if (typeof window === 'undefined' || !window.google?.accounts?.oauth2?.initTokenClient) {
-    throw new Error('Google Identity Services token client is not available.');
-  }
-
-  let client;
-  client = window.google.accounts.oauth2.initTokenClient({
+/**
+ * Initializes the GIS token client. Must be called once after the GIS script loads.
+ * Throws synchronously if called before window.google is available.
+ */
+export function initAuth() {
+  tokenClient = window.google.accounts.oauth2.initTokenClient({
     client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
-    scope: SCOPES,
-    // If a silent re-auth attempt (prompt: 'none') fails because interaction is required,
-    // automatically fall back to an interactive consent dialog.
-    error_callback: (error) => {
-      if (error?.type !== 'popup_closed') {
-        client.requestAccessToken({ prompt: 'consent' });
-      }
+    scope:
+      'https://www.googleapis.com/auth/drive.file ' +
+      'https://www.googleapis.com/auth/spreadsheets',
+    callback: (response) => {
+      _handleTokenCallback(response);
     },
-    callback: async (response) => {
-      if (response?.error) {
-        onAuthError?.(response);
-        return;
-      }
-
-      try {
-        const savedSession = await saveSessionToken(response);
-        onAuthSuccess?.(savedSession);
-      } catch (error) {
-        onAuthError?.(error);
-      }
-    },
+    prompt: '',
   });
-  return client;
 }
 
-export async function saveSessionToken(tokenResponse) {
-  const accessToken = tokenResponse?.access_token;
+/**
+ * Internal callback handler — not exported.
+ */
+async function _handleTokenCallback(response) {
+  if (response.error) {
+    const code =
+      response.error === 'popup_closed_by_user' ||
+      response.error === 'access_denied'
+        ? 'AUTH_CANCELLED'
+        : { code: 'AUTH_FAILED', detail: response.error };
 
-  if (!accessToken) {
-    throw new Error('A Google access token is required to persist the session.');
+    const err =
+      typeof code === 'string' ? { code } : code;
+
+    _rejectSignIn?.(err);
+    _resolveSignIn = null;
+    _rejectSignIn  = null;
+    return;
   }
 
-  const db = await getDB();
-  const tx = db.transaction(['sessionStateStore'], 'readwrite');
-  const store = tx.objectStore('sessionStateStore');
-
-  // Read the existing record so we can preserve workingFileId, masterFileId,
-  // and any previously stored refreshToken (Google only sends it on the first grant).
-  const existing = await store.get('CURRENT_SESSION');
-
-  const sessionRecord = {
-    ...(existing ?? {}),
-    sessionId: 'CURRENT_SESSION',
-    accessToken,
-    refreshToken: tokenResponse.refresh_token ?? existing?.refreshToken ?? null,
-    tokenIssuedAt: Date.now(),
-    workingFileId: existing?.workingFileId ?? null,
-    masterFileId: existing?.masterFileId ?? null,
-  };
-
-  await store.put(sessionRecord);
-  await tx.done;
-
-  return sessionRecord;
-}
-
-export async function getValidToken() {
-  const db = await getDB();
-  const session = await db
-    .transaction(['sessionStateStore'], 'readonly')
-    .objectStore('sessionStateStore')
-    .get('CURRENT_SESSION');
-
-  if (!session?.accessToken) {
-    return null;
-  }
-
-  const ageMs = Date.now() - (session.tokenIssuedAt ?? 0);
-
-  // Token is fresh — return immediately without a network call
-  if (ageMs < SILENT_REFRESH_THRESHOLD_MS) {
-    return session.accessToken;
-  }
-
-  // Token is stale — attempt a silent refresh using the stored refresh token
-  if (session.refreshToken) {
+  try {
+    let existing = null;
     try {
-      const params = new URLSearchParams({
-        client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
-        grant_type: 'refresh_token',
-        refresh_token: session.refreshToken,
-      });
-
-      const response = await fetch('https://oauth2.googleapis.com/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: params.toString(),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        await saveSessionToken(data);
-        return data.access_token;
-      }
-
-      // 4xx means the refresh token itself is revoked or expired — clear credentials
-      if (response.status >= 400 && response.status < 500) {
-        const clearTx = db.transaction(['sessionStateStore'], 'readwrite');
-        const clearStore = clearTx.objectStore('sessionStateStore');
-        const stale = await clearStore.get('CURRENT_SESSION');
-        if (stale) {
-          await clearStore.put({ ...stale, accessToken: null, refreshToken: null });
-        }
-        await clearTx.done;
-      }
+      existing = await visitorService.readSession();
     } catch {
-      // Network failure (device offline) — return null so the caller
-      // shows the offline guardrail instead of crashing
+      // treat as no existing session; proceed
     }
 
-    return null;
-  }
+    await visitorService.writeSession({
+      accessToken:   response.access_token,
+      tokenIssuedAt: Date.now(),
+      // Never overwrite refreshToken with undefined
+      refreshToken:  response.refresh_token ?? existing?.refreshToken ?? null,
+    });
 
-  // No refresh token available — caller must trigger interactive re-auth
-  return null;
+    _resolveSignIn?.();
+  } catch {
+    _rejectSignIn?.({ code: 'SESSION_WRITE_FAILED' });
+  } finally {
+    _resolveSignIn = null;
+    _rejectSignIn  = null;
+  }
 }
 
-export function requestGoogleAuth(tokenClient, promptType = '') {
-  if (!tokenClient?.requestAccessToken) {
-    throw new Error('Google token client is not available.');
-  }
-
-  return tokenClient.requestAccessToken({
-    prompt: promptType || 'select_account',
+/**
+ * Opens the GIS authorization popup. Must be called from a user-gesture handler.
+ * @returns {Promise<void>}
+ */
+export function requestSignIn() {
+  return new Promise((resolve, reject) => {
+    _resolveSignIn = resolve;
+    _rejectSignIn  = reject;
+    try {
+      tokenClient.requestAccessToken({ prompt: '' });
+    } catch (err) {
+      // Synchronous throw can indicate popup blocking in some environments
+      _resolveSignIn = null;
+      _rejectSignIn  = null;
+      reject({ code: 'POPUP_BLOCKED' });
+    }
   });
 }
 
-export function handleExpiredTokenReAuth(tokenClient) {
-  if (!tokenClient?.requestAccessToken) {
-    throw new Error('Google token client is not available.');
+/**
+ * Re-opens the GIS popup to obtain a fresh token. Used by syncService before pushing data.
+ * @returns {Promise<void>}
+ */
+export function reAuthenticate() {
+  return new Promise((resolve, reject) => {
+    _resolveSignIn = resolve;
+    _rejectSignIn  = reject;
+    try {
+      tokenClient.requestAccessToken({ prompt: '' });
+    } catch {
+      _resolveSignIn = null;
+      _rejectSignIn  = null;
+      reject({ code: 'AUTH_FAILED', detail: 'requestAccessToken threw synchronously' });
+    }
+  });
+}
+
+/**
+ * Returns true if the stored token is within the 50-minute safety window.
+ * Returns false if no session exists or IDB throws.
+ * @returns {Promise<boolean>}
+ */
+export async function isTokenValid() {
+  try {
+    const session = await visitorService.readSession();
+    if (!session || !session.tokenIssuedAt) return false;
+    return (Date.now() - session.tokenIssuedAt) < TOKEN_SAFE_WINDOW_MS;
+  } catch {
+    return false;
   }
+}
 
-  // Attempt silent re-auth first (no popup if the Google session cookie is still valid).
-  // If interaction is required, the error_callback configured in initTokenClient will
-  // automatically fall back to requestAccessToken({ prompt: 'consent' }).
-  tokenClient.requestAccessToken({ prompt: 'none' });
-
-  return {
-    shouldReauthenticate: true,
-    notice: 'Su sesión ha expirado. Por favor, confirme su cuenta de Google en la ventana emergente para finalizar la sincronización.',
-  };
+/**
+ * Returns the stored access token string, or null if absent or IDB throws.
+ * Does not check token validity.
+ * @returns {Promise<string|null>}
+ */
+export async function getAccessToken() {
+  try {
+    const session = await visitorService.readSession();
+    return session?.accessToken ?? null;
+  } catch {
+    return null;
+  }
 }

@@ -1,246 +1,159 @@
-import { getValidToken } from './authService.js';
-import { getDB } from '../db/db.js';
-import { seedMockVisitors } from './visitorService.js';
+import { getAccessToken } from './authService.js';
 
-const TAB_NAME = "'Respuestas de formulario 1'";
+const DRIVE_FILES_BASE  = 'https://www.googleapis.com/drive/v3/files';
+const SHEETS_BASE       = 'https://sheets.googleapis.com/v4/spreadsheets';
+// Hardcoded tab name — must not be parameterized (per spec)
+const SHEET_TAB         = 'Respuestas de formulario 1';
+const SHEET_TAB_ENCODED = encodeURIComponent(SHEET_TAB);
 
-// Maps internal field names to their exact spreadsheet column header strings
-const COLUMN_HEADERS = {
-  visitorId:   'DOCUMENTO DE IDENTIDAD DEL VISITANTE',
-  visitorName: 'APELLIDOS Y NOMBRES COMPLETOS DEL VISITANTE (MAYÚSCULA)',
-  hostName:    'APELLIDOS Y NOMBRES COMPLETOS DEL ADOLESCENTE (MAYÚSCULA)',
-  hostId:      'DOCUMENTO DE IDENTIDAD DEL ADOLESCENTE',
-  visitorAge:  'EDAD DEL VISITANTE',
-  relationship:'PARENTESCO CON EL ADOLESCENTE',
-  visitType:   'TIPO DE VISITA',
-  visitorDept: 'DEPARTAMENTO DE RESIDENCIA DEL VISITANTE',
-  visitorProv: 'PROVINCIA DE RESIDENCIA DEL VISITANTE',
-  visitorDist: 'DISTRITO DE RESIDENCIA DEL VISITANTE',
-};
-
-// Scans up to the first 5 rows to find the row that contains the actual column
-// headers, skipping any banner or title rows that appear above the data.
-function findHeaderRowIndex(rowsArray) {
-  const knownHeaders = Object.values(COLUMN_HEADERS).map((h) => h.toUpperCase());
-  for (let i = 0; i < Math.min(rowsArray.length, 5); i++) {
-    const candidate = rowsArray[i].map((h) => String(h).trim().toUpperCase());
-    if (knownHeaders.some((h) => candidate.includes(h))) return i;
-  }
-  return 0;
+async function authHeaders() {
+  const token = await getAccessToken();
+  if (!token) throw { code: 'NO_TOKEN' };
+  return { Authorization: `Bearer ${token}` };
 }
 
-export function indexToColumnLetter(index) {
-  let result = '';
-  let n = index;
-  while (n >= 0) {
-    result = String.fromCharCode(65 + (n % 26)) + result;
-    n = Math.floor(n / 26) - 1;
+/**
+ * Searches Drive for an existing file named `{masterFileName}_ASISTENCIA`.
+ * Returns the first match or null.
+ * @param {string} masterFileName
+ * @returns {Promise<{id: string, name: string}|null>}
+ */
+export async function searchForAsistenciaFile(masterFileName) {
+  const headers = await authHeaders();
+  const q = encodeURIComponent(`name='${masterFileName}_ASISTENCIA' and trashed=false`);
+  const url = `${DRIVE_FILES_BASE}?q=${q}&fields=files(id,name)&corpora=user`;
+
+  let response;
+  try {
+    response = await fetch(url, { headers });
+  } catch {
+    throw { code: 'SEARCH_NETWORK_ERROR' };
   }
-  return result;
-}
-
-export async function cloneMasterSpreadsheet(masterFileId, masterFileName) {
-  const token = await getValidToken();
-
-  if (!token) {
-    return { status: 'AUTH_REQUIRED', message: 'Sesión expirada. Confirme su cuenta.' };
-  }
-
-  // Strip file extension and append _ASISTENCIA
-  const baseName = masterFileName.replace(/\.[^/.]+$/, '');
-  const cloneName = `${baseName}_ASISTENCIA`;
-
-  const response = await fetch(
-    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(masterFileId)}/copy`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ name: cloneName }),
-    },
-  );
 
   if (!response.ok) {
-    const errorBody = await response.json().catch(() => ({}));
-    throw new Error(errorBody.error?.message ?? `Drive clone failed with status ${response.status}`);
+    if (response.status === 401) throw { code: 'SEARCH_UNAUTHORIZED' };
+    if (response.status === 403) throw { code: 'SEARCH_FORBIDDEN' };
+    throw { code: 'SEARCH_API_ERROR' };
   }
 
   const data = await response.json();
-  return data.id;
+  return data.files?.length > 0 ? data.files[0] : null;
 }
 
-export async function fetchSpreadsheetData(workingFileId, range = "'Respuestas de formulario 1'!A:Z") {
-  const token = await getValidToken();
+/**
+ * Deletes an orphaned _ASISTENCIA file from Drive.
+ * @param {string} fileId
+ */
+export async function deleteFile(fileId) {
+  const headers = await authHeaders();
 
-  if (!token) {
-    return { status: 'AUTH_REQUIRED', message: 'Sesión expirada. Confirme su cuenta.' };
+  let response;
+  try {
+    response = await fetch(`${DRIVE_FILES_BASE}/${fileId}`, {
+      method: 'DELETE',
+      headers,
+    });
+  } catch {
+    throw { code: 'DELETE_NETWORK_ERROR' };
   }
 
-  const encodedRange = encodeURIComponent(range);
-  const response = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(workingFileId)}/values/${encodedRange}`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-    },
-  );
+  if (response.status === 204) return; // success
+
+  if (response.status === 401) throw { code: 'DELETE_UNAUTHORIZED' };
+  if (response.status === 403) throw { code: 'DELETE_FORBIDDEN' };
+  if (response.status === 404) throw { code: 'DELETE_NOT_FOUND' };
+  throw { code: 'DELETE_API_ERROR' };
+}
+
+/**
+ * Copies the master spreadsheet to a new `{masterFileName}_ASISTENCIA` working copy.
+ * @param {string} masterFileId
+ * @param {string} masterFileName
+ * @returns {Promise<{workingFileId: string}>}
+ */
+export async function copyMasterFile(masterFileId, masterFileName) {
+  const headers = await authHeaders();
+
+  let response;
+  try {
+    response = await fetch(`${DRIVE_FILES_BASE}/${masterFileId}/copy`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: `${masterFileName}_ASISTENCIA` }),
+    });
+  } catch {
+    throw { code: 'COPY_NETWORK_ERROR' };
+  }
 
   if (!response.ok) {
-    const errorBody = await response.json().catch(() => ({}));
-    throw new Error(
-      errorBody.error?.message ?? `Sheets fetch failed with status ${response.status}`,
-    );
+    if (response.status === 401) throw { code: 'COPY_UNAUTHORIZED' };
+    if (response.status === 403) throw { code: 'COPY_FORBIDDEN' };
+    if (response.status === 404) throw { code: 'COPY_NOT_FOUND' };
+    throw { code: 'COPY_API_ERROR' };
+  }
+
+  const data = await response.json();
+  return { workingFileId: data.id };
+}
+
+/**
+ * Reads all rows from the working copy spreadsheet.
+ * Returns raw string[][] where row 0 is the header.
+ * @param {string} workingFileId
+ * @returns {Promise<string[][]>}
+ */
+export async function fetchSheetData(workingFileId) {
+  const headers = await authHeaders();
+  const url = `${SHEETS_BASE}/${workingFileId}/values/${SHEET_TAB_ENCODED}`;
+
+  let response;
+  try {
+    response = await fetch(url, { headers });
+  } catch {
+    throw { code: 'FETCH_NETWORK_ERROR' };
+  }
+
+  if (!response.ok) {
+    if (response.status === 401) throw { code: 'FETCH_UNAUTHORIZED' };
+    if (response.status === 403) throw { code: 'FETCH_FORBIDDEN' };
+    if (response.status === 404) throw { code: 'FETCH_NOT_FOUND' };
+    throw { code: 'FETCH_API_ERROR' };
   }
 
   const data = await response.json();
   return data.values ?? [];
 }
 
-export async function ensureAttendanceColumn(workingFileId, rowsArray) {
-  if (!rowsArray || rowsArray.length < 1) return rowsArray;
+/**
+ * Writes attendance values to the ASISTENCIA column via batchUpdate.
+ * @param {string} workingFileId
+ * @param {Array<{rowIndex: number, columnLetter: string}>} updates
+ */
+export async function batchUpdateAttendance(workingFileId, updates) {
+  const headers = await authHeaders();
+  const url = `${SHEETS_BASE}/${workingFileId}/values:batchUpdate`;
 
-  const headerRowIndex = findHeaderRowIndex(rowsArray);
-  const upperHeaders = rowsArray[headerRowIndex].map((h) => String(h).trim().toUpperCase());
-  if (upperHeaders.includes('ASISTENCIA')) return rowsArray;
+  const data = updates.map(({ rowIndex, columnLetter }) => ({
+    range:  `${SHEET_TAB}!${columnLetter}${rowIndex}`,
+    values: [['TRUE']],
+  }));
 
-  // Use the widest row to find the true last column across ALL rows.
-  const maxColumns = rowsArray.reduce((max, row) => Math.max(max, row.length), 0);
-
-  const applyInMemory = (arr) =>
-    arr.map((row, i) => {
-      if (i === headerRowIndex) return [...row, 'ASISTENCIA'];
-      if (i > headerRowIndex) return [...row, 'FALSE'];
-      return row; // leave title rows above the header untouched
+  let response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ valueInputOption: 'RAW', data }),
     });
-
-  // Skip API call for mock/dev file IDs
-  if (!workingFileId || String(workingFileId).startsWith('mock')) {
-    return applyInMemory(rowsArray);
+  } catch {
+    throw { code: 'BATCH_NETWORK_ERROR' };
   }
 
-  const token = await getValidToken();
-  if (!token) return rowsArray;
+  if (response.ok) return; // HTTP 200 — success
 
-  const colLetter = indexToColumnLetter(maxColumns);
-  // Write ASISTENCIA header at the header row, then FALSE for every data row below it.
-  const startRow = headerRowIndex + 1; // 1-based sheet row
-  const endRow = rowsArray.length;
-  const values = [['ASISTENCIA'], ...Array(endRow - startRow).fill(['FALSE'])];
-  const range = encodeURIComponent(`${TAB_NAME}!${colLetter}${startRow}:${colLetter}${endRow}`);
-
-  const response = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(workingFileId)}/values/${range}?valueInputOption=RAW`,
-    {
-      method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ values }),
-    },
-  );
-
-  if (!response.ok) {
-    const errorBody = await response.json().catch(() => ({}));
-    throw new Error(
-      errorBody.error?.message ?? `Failed to write ASISTENCIA column: ${response.status}`,
-    );
-  }
-
-  return applyInMemory(rowsArray);
-}
-
-export async function ingestRowsToIndexedDB(rowsArray, masterFileId, workingFileId) {
-  if (!rowsArray || rowsArray.length < 2) return;
-
-  // Ensure the ASISTENCIA column exists in the working spreadsheet
-  const rows = await ensureAttendanceColumn(workingFileId, rowsArray);
-
-  // Locate the actual header row (skip any banner/title rows above it)
-  const headerRowIndex = findHeaderRowIndex(rows);
-
-  // Build a column-index lookup from the header row (case-insensitive)
-  const headerRow = rows[headerRowIndex].map((h) => String(h).trim().toUpperCase());
-  const colIndex = {};
-  for (const [field, header] of Object.entries(COLUMN_HEADERS)) {
-    colIndex[field] = headerRow.indexOf(header.toUpperCase());
-  }
-
-  // Fallback: if some headers are missing (e.g. no text in those cells),
-  // derive positions relative to the hostName anchor column.
-  if (colIndex.visitorId === -1 && colIndex.hostName !== -1) {
-    const anchor = colIndex.hostName;
-    colIndex.hostId       = anchor + 1;
-    colIndex.visitorName  = anchor + 2;
-    colIndex.visitorId    = anchor + 3;
-    colIndex.visitorAge   = anchor + 4;
-    colIndex.relationship = anchor + 5;
-    colIndex.visitType    = anchor + 6;
-    colIndex.visitorDept  = anchor + 7;
-    colIndex.visitorProv  = anchor + 8;
-    colIndex.visitorDist  = anchor + 9;
-    console.warn('[ingest] Incomplete header row — using position-based fallback from hostName anchor at index', anchor);
-  }
-
-  if (colIndex.visitorId === -1) {
-    const found = rows[headerRowIndex].map((h, i) => `[${i}]="${h}"`).join(', ');
-    throw new Error(
-      `Columna requerida no encontrada: "${COLUMN_HEADERS.visitorId}". ` +
-      `Encabezados encontrados en fila ${headerRowIndex + 1}: ${found}. ` +
-      `Verifique que el archivo tiene el formato correcto.`
-    );
-  }
-
-  const getCell = (row, field) => {
-    const idx = colIndex[field];
-    return idx !== -1 && idx < row.length ? String(row[idx] ?? '').trim() : '';
-  };
-
-  // Data starts on the row after the header row
-  const dataRows = rows.slice(headerRowIndex + 1);
-
-  const mappedVisitors = dataRows
-    .map((row, i) => {
-      const visitorId = getCell(row, 'visitorId');
-      // Calculate sheetRowIndex BEFORE filtering so empty rows don't skew the count
-      const sheetRowIndex = headerRowIndex + i + 2; // 1-based sheet row number
-      return {
-        recordId:            `${visitorId}_${sheetRowIndex}`,
-        visitorId,
-        visitorName:         getCell(row, 'visitorName').toUpperCase(),
-        hostName:            getCell(row, 'hostName').toUpperCase() || 'NO ASIGNADO',
-        hostId:              getCell(row, 'hostId'),
-        visitorAge:          getCell(row, 'visitorAge'),
-        relationship:        getCell(row, 'relationship').toUpperCase() || 'GENERAL',
-        visitType:           getCell(row, 'visitType'),
-        visitorDept:         getCell(row, 'visitorDept'),
-        visitorProv:         getCell(row, 'visitorProv'),
-        visitorDist:         getCell(row, 'visitorDist'),
-        sheetRowIndex,
-        attendanceStatus:    false,
-        attendanceTimestamp: null,
-        syncedWithCloud:     false,
-      };
-    })
-    .filter((visitor) => visitor.visitorId.length > 0);
-
-  await seedMockVisitors(mappedVisitors);
-
-  if (masterFileId !== undefined || workingFileId !== undefined) {
-    const db = await getDB();
-    const tx = db.transaction(['sessionStateStore'], 'readwrite');
-    const store = tx.objectStore('sessionStateStore');
-    const session = await store.get('CURRENT_SESSION');
-
-    if (session) {
-      await store.put({
-        ...session,
-        masterFileId: masterFileId ?? session.masterFileId,
-        workingFileId: workingFileId ?? session.workingFileId,
-      });
-    }
-
-    await tx.done;
-  }
+  if (response.status === 401) throw { code: 'BATCH_UNAUTHORIZED' };
+  if (response.status === 403) throw { code: 'BATCH_FORBIDDEN' };
+  if (response.status === 429) throw { code: 'BATCH_RATE_LIMITED' };
+  if (response.status >= 500)  throw { code: 'BATCH_SERVER_ERROR' };
+  throw { code: 'BATCH_API_ERROR' };
 }

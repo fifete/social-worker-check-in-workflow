@@ -1,10 +1,19 @@
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import './index.css'
-import App from './App.jsx'
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App.jsx';
+import './index.css';
+import * as authService from './services/authService.js';
 
-createRoot(document.getElementById('root')).render(
-  <StrictMode>
+// Load Google Identity Services; call initAuth once script is ready
+const gisScript = document.createElement('script');
+gisScript.src = 'https://accounts.google.com/gsi/client';
+gisScript.async = true;
+gisScript.defer = true;
+gisScript.onload = () => authService.initAuth();
+document.head.appendChild(gisScript);
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
     <App />
-  </StrictMode>,
-)
+  </React.StrictMode>
+);

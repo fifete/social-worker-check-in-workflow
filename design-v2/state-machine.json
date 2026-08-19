@@ -1,0 +1,322 @@
+{
+  "id": "checkInApp",
+  "initial": "AUTH_PENDING",
+  "states": {
+
+    "AUTH_PENDING": {
+      "meta": {
+        "description": "visitorStore empty and/or no valid token. Auth screen shown."
+      },
+      "on": {
+        "AUTH_SUCCESS": [
+          {
+            "guard": "visitorStoreEmpty",
+            "target": "FILE_PICKER_PENDING"
+          },
+          {
+            "guard": "visitorStoreHydrated",
+            "target": "ATTENDANCE_PHASE"
+          }
+        ]
+      }
+    },
+
+    "FILE_PICKER_PENDING": {
+      "meta": {
+        "description": "Valid token present; visitorStore still empty. Worker must select master spreadsheet."
+      },
+      "initial": "AWAITING_SELECTION",
+      "states": {
+        "AWAITING_SELECTION": {
+          "on": {
+            "FILE_PICKED": {
+              "target": "CHECKING_COLLISION",
+              "actions": ["storeMasterFileId"]
+            }
+          }
+        },
+        "CHECKING_COLLISION": {
+          "on": {
+            "COLLISION_NOT_FOUND": "COPYING_FILE",
+            "COLLISION_FOUND": {
+              "target": "COLLISION_PROMPT",
+              "actions": ["storeOrphanFileId"]
+            },
+            "COLLISION_CHECK_FAILED": {
+              "target": "AWAITING_SELECTION",
+              "actions": ["showCollisionCheckError"]
+            }
+          }
+        },
+        "COLLISION_PROMPT": {
+          "on": {
+            "USE_EXISTING_FILE": {
+              "target": "FETCHING_DATA",
+              "actions": ["storeWorkingFileIdFromOrphan"]
+            },
+            "CREATE_NEW_COPY": "DELETING_ORPHAN"
+          }
+        },
+        "DELETING_ORPHAN": {
+          "on": {
+            "ORPHAN_DELETED": "COPYING_FILE",
+            "DELETE_FAILED": {
+              "target": "COLLISION_PROMPT",
+              "actions": ["showDeleteError"]
+            }
+          }
+        },
+        "COPYING_FILE": {
+          "on": {
+            "COPY_SUCCESS": {
+              "target": "FETCHING_DATA",
+              "actions": ["storeWorkingFileId"]
+            },
+            "COPY_FAILED": {
+              "target": "AWAITING_SELECTION",
+              "actions": ["showCopyError"]
+            }
+          }
+        },
+        "FETCHING_DATA": {
+          "on": {
+            "HYDRATION_COMPLETE": "#checkInApp.ATTENDANCE_PHASE",
+            "FETCH_FAILED": {
+              "target": "AWAITING_SELECTION",
+              "actions": ["showFetchError"]
+            }
+          }
+        }
+      }
+    },
+
+    "ATTENDANCE_PHASE": {
+      "type": "parallel",
+      "states": {
+
+        "appFlow": {
+          "initial": "READY_EMPTY",
+          "states": {
+            "READY_EMPTY": {
+              "meta": {
+                "description": "visitorStore hydrated; no active search or selection."
+              },
+              "on": {
+                "SEARCH_RESULTS_MULTIPLE": "MULTI_MATCH",
+                "SEARCH_RESULT_SINGLE": {
+                  "target": "CONFIRMED_MATCH",
+                  "actions": ["setSelectedVisitor"]
+                },
+                "BARCODE_RESULT": {
+                  "target": "CONFIRMED_MATCH",
+                  "actions": ["setSelectedVisitorFromBarcode"]
+                }
+              }
+            },
+
+            "MULTI_MATCH": {
+              "meta": {
+                "description": "Search returns 2–15 results. Worker must tap one to select."
+              },
+              "on": {
+                "VISITOR_SELECTED": {
+                  "target": "CONFIRMED_MATCH",
+                  "actions": ["setSelectedVisitor"]
+                },
+                "SEARCH_CLEARED": {
+                  "target": "READY_EMPTY",
+                  "actions": ["clearSearch"]
+                },
+                "SEARCH_RESULTS_MULTIPLE": "MULTI_MATCH",
+                "SEARCH_RESULT_SINGLE": {
+                  "target": "CONFIRMED_MATCH",
+                  "actions": ["setSelectedVisitor"]
+                },
+                "SEARCH_NO_RESULTS": {
+                  "target": "READY_EMPTY",
+                  "actions": ["showNoResults"]
+                }
+              }
+            },
+
+            "CONFIRMED_MATCH": {
+              "meta": {
+                "description": "Single visitor selected. Full visitor card shown. Action buttons driven by attendanceStatus."
+              },
+              "on": {
+                "ATTENDANCE_RECORDED": {
+                  "target": "READY_EMPTY",
+                  "actions": [
+                    "writeAttendanceToIDB",
+                    "resetSearchAndSelection",
+                    "scheduleToast",
+                    "scheduleChirp"
+                  ]
+                },
+                "UNDO_ATTENDANCE": {
+                  "target": "CONFIRMED_MATCH",
+                  "actions": ["clearAttendanceRecord"]
+                },
+                "BACK": {
+                  "target": "READY_EMPTY",
+                  "actions": ["resetSearchAndSelection"]
+                }
+              }
+            }
+          }
+        },
+
+        "scanner": {
+          "initial": "IDLE",
+          "states": {
+            "IDLE": {
+              "meta": {
+                "description": "Camera active. No candidate in frame. Frame overlay visible with instructional label."
+              },
+              "on": {
+                "CANDIDATE_DETECTED": "CANDIDATE_DETECTED",
+                "CAMERA_PERMISSION_DENIED": "CAMERA_DENIED",
+                "BARCODE_DETECTOR_UNAVAILABLE": "FALLBACK_ACTIVE"
+              }
+            },
+
+            "CANDIDATE_DETECTED": {
+              "meta": {
+                "description": "Barcode candidate in frame. Hold-progress arc counting 800ms. Distinct color shift on frame."
+              },
+              "after": {
+                "800": {
+                  "target": "SCAN_SUCCESS",
+                  "guard": "candidateStillLocked"
+                }
+              },
+              "on": {
+                "CANDIDATE_LOST": "IDLE",
+                "SCAN_AMBIGUOUS": "SCAN_ERROR"
+              }
+            },
+
+            "SCAN_SUCCESS": {
+              "meta": {
+                "description": "Lock confirmed. Frame flashes green. Haptic pulse fires. Audio chirp plays. Result dispatched."
+              },
+              "entry": ["dispatchBarcodeResult", "flashGreen", "playChirp", "triggerHaptic"],
+              "after": {
+                "600": "IDLE"
+              }
+            },
+
+            "SCAN_ERROR": {
+              "meta": {
+                "description": "Lock failed or ambiguous read. Frame flashes amber. Retry label shown."
+              },
+              "entry": ["flashAmber"],
+              "after": {
+                "2000": "IDLE"
+              }
+            },
+
+            "CAMERA_DENIED": {
+              "meta": {
+                "description": "Camera permission refused. Zone replaced with icon + Spanish error message + retry button."
+              },
+              "on": {
+                "RETRY_CAMERA": "IDLE"
+              }
+            },
+
+            "FALLBACK_ACTIVE": {
+              "meta": {
+                "description": "BarcodeDetector API unavailable. @zxing loaded. Small non-intrusive fallback badge shown."
+              },
+              "on": {
+                "CANDIDATE_DETECTED": "CANDIDATE_DETECTED",
+                "CAMERA_PERMISSION_DENIED": "CAMERA_DENIED"
+              }
+            }
+          }
+        }
+
+      },
+      "on": {
+        "SYNC_INITIATED": "#checkInApp.SYNCING"
+      }
+    },
+
+    "SYNCING": {
+      "meta": {
+        "description": "End-of-event sync in progress. Full-screen overlay active. No attendance operations possible."
+      },
+      "initial": "CHECKING_TOKEN",
+      "states": {
+        "CHECKING_TOKEN": {
+          "on": {
+            "TOKEN_VALID": "PUSHING_DATA",
+            "TOKEN_EXPIRED": "REAUTHING"
+          }
+        },
+        "REAUTHING": {
+          "on": {
+            "AUTH_SUCCESS": {
+              "target": "PUSHING_DATA",
+              "actions": ["updateStoredToken"]
+            },
+            "AUTH_FAILED": {
+              "target": "#checkInApp.ATTENDANCE_PHASE",
+              "actions": ["showReauthError"]
+            }
+          }
+        },
+        "PUSHING_DATA": {
+          "on": {
+            "PUSH_SUCCESS": "PURGING_STORES",
+            "PUSH_FAILED": {
+              "target": "#checkInApp.ATTENDANCE_PHASE",
+              "actions": ["showSyncError"]
+            }
+          }
+        },
+        "PURGING_STORES": {
+          "on": {
+            "PURGE_COMPLETE": "#checkInApp.AUTH_PENDING"
+          }
+        }
+      }
+    }
+
+  },
+
+  "guards": {
+    "visitorStoreEmpty": "Returns true when visitorStore.count() === 0",
+    "visitorStoreHydrated": "Returns true when visitorStore.count() > 0",
+    "candidateStillLocked": "Returns true when the barcode candidate value has not changed or been lost during the 800ms hold window"
+  },
+
+  "actions": {
+    "storeMasterFileId": "Writes masterFileId to sessionStateStore['CURRENT_SESSION']",
+    "storeOrphanFileId": "Holds orphan file ID in transient machine context for collision resolution",
+    "storeWorkingFileIdFromOrphan": "Writes orphan file ID as workingFileId to sessionStateStore['CURRENT_SESSION']",
+    "storeWorkingFileId": "Writes newly-copied file ID as workingFileId to sessionStateStore['CURRENT_SESSION']",
+    "showCollisionCheckError": "Renders inline error in FILE_PICKER_PENDING zone",
+    "showDeleteError": "Renders inline error in COLLISION_PROMPT overlay",
+    "showCopyError": "Renders inline error in FILE_PICKER_PENDING zone",
+    "showFetchError": "Renders inline error in FILE_PICKER_PENDING zone",
+    "setSelectedVisitor": "Writes selected visitor record to transient machine context",
+    "setSelectedVisitorFromBarcode": "Looks up record by visitorId from barcode payload; writes to transient context",
+    "clearSearch": "Clears search input value and result list in Zone 2",
+    "showNoResults": "Renders 'Sin resultados' label in Zone 2",
+    "writeAttendanceToIDB": "Sets attendanceStatus=true, attendanceTimestamp=ISO-8601 now(), syncedWithCloud=false in visitorStore",
+    "resetSearchAndSelection": "Clears search input, result list, and selected visitor from transient context",
+    "scheduleToast": "Queues a non-blocking success toast (3000ms display)",
+    "scheduleChirp": "Queues the Web Audio API confirmation chirp (non-blocking)",
+    "clearAttendanceRecord": "Sets attendanceStatus=false, attendanceTimestamp=null, syncedWithCloud=false in visitorStore",
+    "dispatchBarcodeResult": "Fires BARCODE_RESULT event on appFlow with decoded visitorId payload",
+    "flashGreen": "Triggers Zone 1 frame green flash CSS animation class",
+    "playChirp": "Plays Web Audio API confirmation chirp (~880Hz, 150ms)",
+    "triggerHaptic": "Calls navigator.vibrate(50) if vibration API is supported",
+    "flashAmber": "Triggers Zone 1 frame amber flash CSS animation class",
+    "updateStoredToken": "Writes new accessToken and tokenIssuedAt to sessionStateStore; preserves refreshToken if absent from response",
+    "showReauthError": "Renders re-auth failure message in sync overlay with retry button",
+    "showSyncError": "Renders sync failure message in sync overlay with specific HTTP error label and retry button"
+  }
+}

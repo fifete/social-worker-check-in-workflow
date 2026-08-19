@@ -1,30 +1,72 @@
 @import "tailwindcss";
+@config "../tailwind.config.js";
 
-@theme {
-  /* Custom colors defined natively using CSS properties */
-  --color-brand-emerald: #059669;
-  --color-brand-blue: #2563EB;
-  --color-brand-slate: #0F172A;
-  --color-brand-amber: #D97706;
-  --color-brand-light: #F3F4F6;
+/* ⚠️ Installed Tailwind is v4 (package: @tailwindcss/vite 4.3.2). Spec calls for v3.
+   The @config directive loads the JS config for backwards-compatibility.
+   CSS custom properties on :root remain the single source of truth for all color tokens. */
+
+:root {
+  /* Backgrounds */
+  --color-bg-page:    #FFFFFF;
+  --color-bg-card:    #F9FAFB;
+  --color-bg-input:   #FFFFFF;
+  --color-bg-overlay: rgba(0, 0, 0, 0.55);
+
+  /* Borders */
+  --color-border:       #D1D5DB;
+  --color-border-focus: #1D4ED8;
+
+  /* Text */
+  --color-text-primary:   #111827;
+  --color-text-secondary: #374151;
+  --color-text-disabled:  #9CA3AF;
+  --color-text-inverse:   #FFFFFF;
+
+  /* Brand / Primary action */
+  --color-primary:        #1D4ED8;
+  --color-primary-hover:  #1E40AF;
+  --color-primary-active: #1E3A8A;
+
+  /* Success */
+  --color-success:      #15803D;
+  --color-success-hover:#166534;
+  --color-success-bg:   #DCFCE7;
+  --color-success-text: #14532D;
+
+  /* Warning */
+  --color-warning:     #B45309;
+  --color-warning-bg:  #FEF3C7;
+  --color-warning-text:#78350F;
+
+  /* Danger */
+  --color-danger:      #B91C1C;
+  --color-danger-hover:#991B1B;
+  --color-danger-bg:   #FEE2E2;
+  --color-danger-text: #7F1D1D;
+
+  /* Attended (locked gray state) */
+  --color-attended-bg:    #F3F4F6;
+  --color-attended-text:  #374151;
+  --color-attended-border:#9CA3AF;
+
+  /* Scanner frame */
+  --color-scanner-idle:      #FFFFFF;
+  --color-scanner-candidate: #FACC15;
+  --color-scanner-success:   #22C55E;
+  --color-scanner-error:     #F97316;
 }
 
-/* Enforce system sans-serif bold baseline and prevent horizontal scroll */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 body {
-  @apply font-sans antialiased bg-[#FFFFFF] text-[#0F172A] m-0 p-0 overflow-x-hidden;
-}
-
-/* body {
   margin: 0;
-  min-width: 320px;
-  min-height: 100vh;
-  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  background-color: #ffffff;
-  color: #0f172a;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background-color: var(--color-bg-page);
+  color: var(--color-text-primary);
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  overscroll-behavior: none;
 }
-
-#root {
-  min-height: 100vh;
-} */
