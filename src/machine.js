@@ -184,6 +184,10 @@ export const checkInMachine = createMachine(
                     target: 'READY_EMPTY',
                     actions: 'resetSearchAndSelection',
                   },
+                  BARCODE_RESULT: {
+                    target: 'CONFIRMED_MATCH',
+                    actions: 'setSelectedVisitorFromBarcode',
+                  },
                 },
               },
             },

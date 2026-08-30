@@ -74,8 +74,8 @@ export default function Zone1Scanner({ scannerState, scanCandidate, send, onBarc
   const streamRef   = useRef(null);
   const rafRef      = useRef(null);
   const zxingRef    = useRef(null);
-  const debugCanvasRef = useRef(null);
   const prevScannerState = useRef(null);
+  const scannerModeRef = useRef('unknown');
 
   // ── Camera start / stop ─────────────────────────────────────────────────
   const stopCamera = useCallback(() => {
@@ -181,22 +181,6 @@ export default function Zone1Scanner({ scannerState, scanCandidate, send, onBarc
             const now = Date.now();
             if (now - lastHeartbeat >= 1000) {
               console.log(`[Scanner] ZXing alive — ${frameCount} frames processed, no barcode yet`);
-              // Draw the frame ZXing just scanned so we can visually inspect it
-              if (debugCanvasRef.current && videoRef.current) {
-                const vw = videoRef.current.videoWidth;
-                const vh = videoRef.current.videoHeight;
-                console.log(`[Scanner] Debug draw: ${vw}x${vh} readyState=${videoRef.current.readyState}`);
-                const ctx = debugCanvasRef.current.getContext('2d');
-                // Use explicit fallback so canvas is never 0×0
-                debugCanvasRef.current.width = vw || 320;
-                debugCanvasRef.current.height = vh || 240;
-                // Magenta fill = canvas is sized but drawImage produced nothing
-                ctx.fillStyle = '#ff00ff';
-                ctx.fillRect(0, 0, debugCanvasRef.current.width, debugCanvasRef.current.height);
-                try { ctx.drawImage(videoRef.current, 0, 0); } catch (e) {
-                  console.log('[Scanner] Canvas drawImage failed:', e.message);
-                }
-              }
               lastHeartbeat = now;
               frameCount = 0;
             }
@@ -213,6 +197,7 @@ export default function Zone1Scanner({ scannerState, scanCandidate, send, onBarc
   useEffect(() => {
     if (scannerState === 'IDLE') {
       if ('BarcodeDetector' in window) {
+        scannerModeRef.current = 'BarcodeDetector (native)';
         startCamera().then(() => {
           BarcodeDetector.getSupportedFormats().then(fmts =>
             console.log('[Scanner] BarcodeDetector supported formats:', fmts)
@@ -220,7 +205,7 @@ export default function Zone1Scanner({ scannerState, scanCandidate, send, onBarc
           startNativeScan();
         });
       } else {
-        // Don't start camera — ZXing will start it via decodeFromVideoDevice
+        scannerModeRef.current = 'ZXing (fallback)';
         console.log('[Scanner] BarcodeDetector unavailable — switching to ZXing');
         send({ type: 'BARCODE_DETECTOR_UNAVAILABLE' });
       }
@@ -247,6 +232,7 @@ export default function Zone1Scanner({ scannerState, scanCandidate, send, onBarc
     }
 
     if (scannerState === 'FALLBACK_ACTIVE' && !zxingRef.current) {
+      scannerModeRef.current = 'ZXing (fallback)';
       startZxingScan();
     }
 
@@ -345,15 +331,6 @@ export default function Zone1Scanner({ scannerState, scanCandidate, send, onBarc
         aria-hidden="true"
       />
 
-      {/* Debug frame — shows exactly what ZXing is processing; remove when scanner works */}
-      <canvas
-        ref={debugCanvasRef}
-        style={{
-          position: 'absolute', bottom: 8, right: 8, width: 120, opacity: 0.85,
-          border: '2px solid yellow', borderRadius: 4, pointerEvents: 'none',
-        }}
-      />
-
       {/* Flash overlay */}
       {flashOverlay && (
         <div style={{
@@ -385,18 +362,16 @@ export default function Zone1Scanner({ scannerState, scanCandidate, send, onBarc
         </span>
       </div>
 
-      {/* Fallback badge */}
-      {scannerState === 'FALLBACK_ACTIVE' && (
-        <div style={{
-          position: 'absolute', bottom: 8, right: 8,
-          background: 'rgba(0,0,0,0.65)', borderRadius: 4,
-          padding: '2px 6px',
-        }}>
-          <span className="text-xs" style={{ color: 'var(--color-text-disabled)' }}>
-            Modo compatibilidad
-          </span>
-        </div>
-      )}
+      {/* DEV: scanner mode indicator — remove before production */}
+      {/* <div style={{
+        position: 'absolute', top: 8, left: 8,
+        background: 'rgba(0,0,0,0.7)', borderRadius: 4,
+        padding: '3px 8px',
+      }}>
+        <span style={{ color: '#facc15', fontSize: 11, fontFamily: 'monospace' }}>
+          {scannerModeRef.current}
+        </span>
+      </div> */}
     </div>
   );
 }
