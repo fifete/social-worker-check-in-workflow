@@ -182,11 +182,20 @@ export default function Zone1Scanner({ scannerState, scanCandidate, send, onBarc
             if (now - lastHeartbeat >= 1000) {
               console.log(`[Scanner] ZXing alive — ${frameCount} frames processed, no barcode yet`);
               // Draw the frame ZXing just scanned so we can visually inspect it
-              if (debugCanvasRef.current && videoRef.current?.readyState >= 2) {
+              if (debugCanvasRef.current && videoRef.current) {
+                const vw = videoRef.current.videoWidth;
+                const vh = videoRef.current.videoHeight;
+                console.log(`[Scanner] Debug draw: ${vw}x${vh} readyState=${videoRef.current.readyState}`);
                 const ctx = debugCanvasRef.current.getContext('2d');
-                debugCanvasRef.current.width = videoRef.current.videoWidth;
-                debugCanvasRef.current.height = videoRef.current.videoHeight;
-                ctx.drawImage(videoRef.current, 0, 0);
+                // Use explicit fallback so canvas is never 0×0
+                debugCanvasRef.current.width = vw || 320;
+                debugCanvasRef.current.height = vh || 240;
+                // Magenta fill = canvas is sized but drawImage produced nothing
+                ctx.fillStyle = '#ff00ff';
+                ctx.fillRect(0, 0, debugCanvasRef.current.width, debugCanvasRef.current.height);
+                try { ctx.drawImage(videoRef.current, 0, 0); } catch (e) {
+                  console.log('[Scanner] Canvas drawImage failed:', e.message);
+                }
               }
               lastHeartbeat = now;
               frameCount = 0;
