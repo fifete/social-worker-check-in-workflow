@@ -74,6 +74,7 @@ export default function Zone1Scanner({ scannerState, scanCandidate, send, onBarc
   const streamRef   = useRef(null);
   const rafRef      = useRef(null);
   const zxingRef    = useRef(null);
+  const debugCanvasRef = useRef(null);
   const prevScannerState = useRef(null);
 
   // ── Camera start / stop ─────────────────────────────────────────────────
@@ -110,9 +111,10 @@ export default function Zone1Scanner({ scannerState, scanCandidate, send, onBarc
   // ── Native BarcodeDetector scanning loop ────────────────────────────────
   const startNativeScan = useCallback(() => {
     const detector = new BarcodeDetector({
-      formats: ['pdf417', 'code_128', 'ean_13', 'ean_8', 'qr_code'],
+      formats: ['code_128', 'code_39'],
     });
     let lastValue = null;
+    console.log('[Scanner] Native BarcodeDetector started');
 
     const loop = async () => {
       if (!videoRef.current || videoRef.current.readyState < 2) {
@@ -123,19 +125,19 @@ export default function Zone1Scanner({ scannerState, scanCandidate, send, onBarc
         const results = await detector.detect(videoRef.current);
         if (results.length > 0) {
           const value = results[0].rawValue;
+          console.log('[Scanner] Native detected:', results[0].format, JSON.stringify(value));
           if (lastValue !== value) {
             lastValue = value;
             send({ type: 'CANDIDATE_DETECTED', value });
           }
-          // keep sending to refresh the hold window on ambiguous change
         } else {
           if (lastValue !== null) {
             lastValue = null;
             send({ type: 'CANDIDATE_LOST' });
           }
         }
-      } catch {
-        // detection error — non-blocking
+      } catch (err) {
+        console.log('[Scanner] Native detection error:', err?.name, err?.message);
       }
       rafRef.current = requestAnimationFrame(loop);
     };
@@ -145,36 +147,73 @@ export default function Zone1Scanner({ scannerState, scanCandidate, send, onBarc
 
   // ── @zxing fallback scanning ─────────────────────────────────────────────
   const startZxingScan = useCallback(async () => {
-    const { BrowserMultiFormatReader } = await import('@zxing/library'); // impl detail from _archive
-    const reader = new BrowserMultiFormatReader();
+    const { BrowserMultiFormatReader, DecodeHintType, BarcodeFormat } = await import('@zxing/library');
+    const hints = new Map();
+    hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+      BarcodeFormat.CODE_128,
+      BarcodeFormat.CODE_39,
+    ]);
+    hints.set(DecodeHintType.TRY_HARDER, true);
+    const reader = new BrowserMultiFormatReader(hints);
     zxingRef.current = reader;
+    console.log('[Scanner] ZXing started — CODE_128 + CODE_39 + TRY_HARDER');
+    let frameCount = 0;
+    let lastHeartbeat = Date.now();
+    let hasLoggedCameraInfo = false;
     try {
-      reader.decodeFromVideoElement(videoRef.current, (result, err) => {
+      // ZXing starts its own camera; decodeFromVideoElement conflicts with pre-started streams
+      await reader.decodeFromVideoDevice(undefined, videoRef.current, (result, err) => {
+        if (!hasLoggedCameraInfo && videoRef.current?.srcObject) {
+          hasLoggedCameraInfo = true;
+          const track = videoRef.current.srcObject.getVideoTracks()[0];
+          console.log('[Scanner] Active camera:', track?.label, `| ${videoRef.current.videoWidth}x${videoRef.current.videoHeight}`);
+        }
         if (result) {
           const value = result.getText();
+          console.log('[Scanner] ZXing decoded:', result.getBarcodeFormat(), JSON.stringify(value));
           send({ type: 'CANDIDATE_DETECTED', value });
-        } else if (err && err.name !== 'NotFoundException') {
-          send({ type: 'CANDIDATE_LOST' });
+        } else if (err) {
+          if (err.name !== 'NotFoundException') {
+            console.log('[Scanner] ZXing error:', err.name, err.message);
+          } else {
+            frameCount++;
+            // log once per second so we can confirm the loop is alive without flooding
+            const now = Date.now();
+            if (now - lastHeartbeat >= 1000) {
+              console.log(`[Scanner] ZXing alive — ${frameCount} frames processed, no barcode yet`);
+              // Draw the frame ZXing just scanned so we can visually inspect it
+              if (debugCanvasRef.current && videoRef.current?.readyState >= 2) {
+                const ctx = debugCanvasRef.current.getContext('2d');
+                debugCanvasRef.current.width = videoRef.current.videoWidth;
+                debugCanvasRef.current.height = videoRef.current.videoHeight;
+                ctx.drawImage(videoRef.current, 0, 0);
+              }
+              lastHeartbeat = now;
+              frameCount = 0;
+            }
+          }
         }
       });
-    } catch {
+    } catch (err) {
+      console.log('[Scanner] ZXing fatal:', err?.name, err?.message);
       send({ type: 'CAMERA_PERMISSION_DENIED' });
     }
   }, [send]);
 
   // ── Initialization ──────────────────────────────────────────────────────
   useEffect(() => {
-    if (scannerState === 'IDLE' || scannerState === 'FALLBACK_ACTIVE') {
-      if (!streamRef.current) {
+    if (scannerState === 'IDLE') {
+      if ('BarcodeDetector' in window) {
         startCamera().then(() => {
-          if (scannerState === 'FALLBACK_ACTIVE') {
-            startZxingScan();
-          } else if ('BarcodeDetector' in window) {
-            startNativeScan();
-          } else {
-            send({ type: 'BARCODE_DETECTOR_UNAVAILABLE' });
-          }
+          BarcodeDetector.getSupportedFormats().then(fmts =>
+            console.log('[Scanner] BarcodeDetector supported formats:', fmts)
+          );
+          startNativeScan();
         });
+      } else {
+        // Don't start camera — ZXing will start it via decodeFromVideoDevice
+        console.log('[Scanner] BarcodeDetector unavailable — switching to ZXing');
+        send({ type: 'BARCODE_DETECTOR_UNAVAILABLE' });
       }
     }
 
@@ -191,17 +230,15 @@ export default function Zone1Scanner({ scannerState, scanCandidate, send, onBarc
     // Re-initialize camera when returning to IDLE from error/denied
     if (scannerState === 'IDLE' && (prev === 'CAMERA_DENIED' || prev === null)) {
       stopCamera();
-      startCamera().then(() => {
-        if ('BarcodeDetector' in window) {
-          startNativeScan();
-        } else {
-          send({ type: 'BARCODE_DETECTOR_UNAVAILABLE' });
-        }
-      });
+      if ('BarcodeDetector' in window) {
+        startCamera().then(() => startNativeScan());
+      } else {
+        send({ type: 'BARCODE_DETECTOR_UNAVAILABLE' });
+      }
     }
 
-    if (scannerState === 'FALLBACK_ACTIVE' && !streamRef.current) {
-      startCamera().then(() => startZxingScan());
+    if (scannerState === 'FALLBACK_ACTIVE' && !zxingRef.current) {
+      startZxingScan();
     }
 
     // SCAN_SUCCESS: look up visitor and dispatch BARCODE_RESULT or pre-fill Zone 2
@@ -297,6 +334,15 @@ export default function Zone1Scanner({ scannerState, scanCandidate, send, onBarc
         muted
         style={{ width: '100%', height: '100%', objectFit: 'cover' }}
         aria-hidden="true"
+      />
+
+      {/* Debug frame — shows exactly what ZXing is processing; remove when scanner works */}
+      <canvas
+        ref={debugCanvasRef}
+        style={{
+          position: 'absolute', bottom: 8, right: 8, width: 120, opacity: 0.85,
+          border: '2px solid yellow', borderRadius: 4, pointerEvents: 'none',
+        }}
       />
 
       {/* Flash overlay */}
