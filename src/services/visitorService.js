@@ -332,3 +332,57 @@ export async function countVisitors() {
     return 0;
   }
 }
+
+/**
+ * Returns the count of records pending sync. Never rejects; returns 0 on IDB error.
+ */
+export async function countPendingAttendance() {
+  const db = await openDatabase();
+  try {
+    const tx    = db.transaction('visitorStore', 'readonly');
+    const store = tx.objectStore('visitorStore');
+    let count   = 0;
+    let cursor  = await store.openCursor();
+    while (cursor) {
+      if (cursor.value.attendanceStatus === true && cursor.value.syncedWithCloud === false) {
+        count++;
+      }
+      cursor = await cursor.continue();
+    }
+    return count;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Clears visitorStore and nulls file fields in sessionStateStore while preserving token.
+ * Caller dispatches RESET_COMPLETE after this resolves.
+ */
+export async function resetSession() {
+  const db = await openDatabase();
+
+  const visitTx = db.transaction('visitorStore', 'readwrite');
+  try {
+    await visitTx.objectStore('visitorStore').clear();
+    await visitTx.done;
+  } catch {
+    throw { code: 'RESET_VISITOR_FAILED' };
+  }
+
+  const sessTx = db.transaction('sessionStateStore', 'readwrite');
+  const store  = sessTx.objectStore('sessionStateStore');
+  try {
+    const existing = await store.get('CURRENT_SESSION');
+    store.put({
+      ...(existing ?? {}),
+      sessionId:        'CURRENT_SESSION',
+      masterFileId:     null,
+      workingFileId:    null,
+      asistenciaColumn: null,
+    });
+    await sessTx.done;
+  } catch {
+    throw { code: 'RESET_SESSION_FAILED' };
+  }
+}

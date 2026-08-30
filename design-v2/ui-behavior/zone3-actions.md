@@ -27,9 +27,11 @@ Zone 3 is **not rendered**. The entire viewport is used for the setup flow. See 
   - Icon: a person silhouette or magnifying glass (non-interactive)
   - Label: **"Escanee o busque un visitante para comenzar."** (`text-base`, `--color-text-secondary`)
 - Sync button: **"Sincronizar Datos con Drive"** — full-width, 56px tall, secondary style (outlined, not filled)
+- "Cambiar archivo" button: **"Cambiar archivo"** — full-width, 56px tall, ghost style (text-only, `--color-text-secondary`, no background, no border); positioned directly below the sync button
 
 **User interactions:**
 - Sync button tap → dispatches `SYNC_INITIATED`
+- "Cambiar archivo" tap → dispatches `RESET_INITIATED`; the machine determines whether to show `RESET_WARNING` (pending records exist) or transition directly to `RESETTING`
 
 ---
 
@@ -138,3 +140,37 @@ When `SYNC_INITIATED` is dispatched, a `position: fixed` full-screen overlay ren
 - Content: centered spinner + **"Sincronizando datos..."** (`text-xl`, `--color-text-inverse`)
 - All Zone 1, 2, and 3 interactions are disabled (pointer-events: none on underlying zones)
 - The overlay persists until `PUSH_SUCCESS` → purge, or `PUSH_FAILED` / `AUTH_FAILED` dismisses it
+
+---
+
+## RESET_WARNING Modal
+
+Triggered when `RESET_INITIATED` is dispatched and `hasPendingAttendance` guard is true.
+
+A **bottom-sheet modal** renders above all zones (same anchoring pattern as the undo confirmation flow).
+
+### When hasPendingAttendance is false
+The machine transitions directly to `RESETTING`. This modal is not shown. No user confirmation is required.
+
+### When hasPendingAttendance is true
+
+**Modal content:**
+
+> ⚠ **"¿Cambiar archivo?"**
+> "Tiene **[N] registro(s) de asistencia** que no han sido sincronizados con Google Drive. Si cambia el archivo ahora, estos registros se perderán de forma permanente."
+>
+> [**"Cancelar"** (secondary)] [**"Sí, cambiar archivo"** (danger)]
+
+`[N]` is the count of records with `attendanceStatus === true AND syncedWithCloud === false`, rendered bold.
+
+**User interactions:**
+- "Cancelar" → dispatches `RESET_CANCELLED` → modal dismisses, `ATTENDANCE_PHASE` resumes
+- "Sí, cambiar archivo" → dispatches `RESET_CONFIRMED` → modal dismisses, machine enters `RESETTING`
+- Tapping outside the bottom sheet: **does not dismiss** — explicit choice is required
+
+**Visual treatment:**
+- Overlay background: `--color-bg-overlay` (rgba(0,0,0,0.55))
+- "Sí, cambiar archivo": `--color-danger` background, `--color-text-inverse` text, 56px tall
+- "Cancelar": outlined secondary style, 56px tall
+- `[N]` count: bold, `--color-danger-text` within body copy
+- All zones are non-interactive (pointer-events blocked) while modal is visible

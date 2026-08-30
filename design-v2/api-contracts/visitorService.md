@@ -291,3 +291,37 @@ Deletes the session record.
 | Code | Condition |
 |---|---|
 | `CLEAR_SESSION_FAILED` | Transaction aborted |
+
+---
+
+### `countPendingAttendance()`
+Returns the count of records pending sync. Called by the app layer before dispatching `RESET_INITIATED` to populate `event.pendingCount`.
+
+**Inputs:** None.
+
+**Outputs:** `Promise<number>` — always resolves (returns `0` on IDB error).
+
+**Behavior:** Cursor scan of `visitorStore`; count records where `attendanceStatus === true AND syncedWithCloud === false`. Returns `0` on any error (never rejects).
+
+---
+
+### `resetSession()`
+Clears all visitor data and nulls the file identifiers in the session record while preserving the authentication token. Called by the app orchestration layer when entering `RESETTING`.
+
+**Inputs:** None.
+
+**Outputs:** `Promise<void>`
+
+**Behavior:**
+1. Open a `readwrite` transaction on `visitorStore`; call `store.clear()`
+2. Read existing session from `sessionStateStore`
+3. Write back a merged record with `masterFileId: null`, `workingFileId: null`, `asistenciaColumn: null`; preserve `accessToken`, `refreshToken`, `tokenIssuedAt` unchanged
+4. Resolve when both operations succeed
+
+The caller dispatches `RESET_COMPLETE` after this function resolves, triggering the machine transition to `FILE_PICKER_PENDING`.
+
+**Error codes:**
+| Code | Condition |
+|---|---|
+| `RESET_VISITOR_FAILED` | `visitorStore.clear()` transaction aborted |
+| `RESET_SESSION_FAILED` | `sessionStateStore.put()` threw |

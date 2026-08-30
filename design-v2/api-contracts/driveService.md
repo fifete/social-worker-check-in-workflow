@@ -161,8 +161,12 @@ Content-Type: application/json
   "valueInputOption": "RAW",
   "data": [
     {
+      "range": "Respuestas de formulario 1!{columnLetter}1",
+      "values": [["ASISTENCIA"]]
+    },
+    {
       "range": "Respuestas de formulario 1!{columnLetter}{rowIndex}",
-      "values": [["TRUE"]]
+      "values": [["Si"]]
     },
     ...
   ]
@@ -171,9 +175,13 @@ Content-Type: application/json
 
 Tab name is the hardcoded literal `'Respuestas de formulario 1'`.
 
+The first entry in `data` always writes `"ASISTENCIA"` to row 1 of the column. This is idempotent when the column already exists, and creates the header when the column was absent from the master and was appended during `hydrateFromRows()`.
+
+Attendance values are written as the string `"Si"` (not a boolean). `valueInputOption: "RAW"` ensures the value is stored as a literal string, not interpreted as a formula.
+
 `rowIndex` is 1-based (row 1 = header; data rows start at 2). It is stored on each visitor record during `visitorService.hydrateFromRows()`.
 
-`columnLetter` is determined during hydration from the header row position of the `ASISTENCIA` column. See `visitorService.md`.
+`columnLetter` is determined during hydration from the header row position of the `ASISTENCIA` column. See `visitorService.md`. All entries in a single batchUpdate share the same `columnLetter`.
 
 **The master file (`masterFileId`) is never passed to this function. This function only ever writes to `workingFileId`.**
 

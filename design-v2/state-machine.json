@@ -28,10 +28,24 @@
       "initial": "AWAITING_SELECTION",
       "states": {
         "AWAITING_SELECTION": {
+          "entry": ["openPickerIfRetrigger"],
           "on": {
             "FILE_PICKED": {
-              "target": "CHECKING_COLLISION",
+              "target": "CONFIRMING_SELECTION",
               "actions": ["storeMasterFileId"]
+            }
+          }
+        },
+        "CONFIRMING_SELECTION": {
+          "meta": {
+            "description": "File selected. Worker reviews the file name. No Drive calls made. FILE_CONFIRMED proceeds; FILE_REJECTED re-opens Picker."
+          },
+          "entry": ["clearRetriggerPicker"],
+          "on": {
+            "FILE_CONFIRMED": "CHECKING_COLLISION",
+            "FILE_REJECTED": {
+              "target": "AWAITING_SELECTION",
+              "actions": ["setRetriggerPicker"]
             }
           }
         },
@@ -239,7 +253,11 @@
 
       },
       "on": {
-        "SYNC_INITIATED": "#checkInApp.SYNCING"
+        "SYNC_INITIATED": "#checkInApp.SYNCING",
+        "RESET_INITIATED": [
+          { "guard": "hasPendingAttendance", "target": "#checkInApp.RESET_WARNING" },
+          { "guard": "noPendingAttendance",  "target": "#checkInApp.RESETTING" }
+        ]
       }
     },
 
@@ -269,7 +287,10 @@
         },
         "PUSHING_DATA": {
           "on": {
-            "PUSH_SUCCESS": "PURGING_STORES",
+            "PUSH_SUCCESS": {
+              "target": "PURGING_STORES",
+              "actions": ["storeSyncedCount"]
+            },
             "PUSH_FAILED": {
               "target": "#checkInApp.ATTENDANCE_PHASE",
               "actions": ["showSyncError"]
@@ -278,9 +299,37 @@
         },
         "PURGING_STORES": {
           "on": {
-            "PURGE_COMPLETE": "#checkInApp.AUTH_PENDING"
+            "PURGE_COMPLETE": "#checkInApp.SYNC_SUCCESS"
           }
         }
+      }
+    },
+
+    "RESET_WARNING": {
+      "meta": {
+        "description": "Worker tapped 'Cambiar archivo' with unsynced records. Bottom-sheet modal shown. All attendance interactions disabled."
+      },
+      "on": {
+        "RESET_CONFIRMED": "#checkInApp.RESETTING",
+        "RESET_CANCELLED": "#checkInApp.ATTENDANCE_PHASE"
+      }
+    },
+
+    "RESETTING": {
+      "meta": {
+        "description": "visitorStore cleared; masterFileId, workingFileId, asistenciaColumn nulled in sessionStateStore; accessToken, refreshToken, tokenIssuedAt preserved. RESET_COMPLETE transitions to FILE_PICKER_PENDING."
+      },
+      "on": {
+        "RESET_COMPLETE": "#checkInApp.FILE_PICKER_PENDING"
+      }
+    },
+
+    "SYNC_SUCCESS": {
+      "meta": {
+        "description": "Sync complete. Full-screen success view shows count of records pushed to Drive. Worker must tap 'Continuar' to acknowledge and transition to AUTH_PENDING."
+      },
+      "on": {
+        "SYNC_ACKNOWLEDGED": "#checkInApp.AUTH_PENDING"
       }
     }
 
@@ -289,7 +338,9 @@
   "guards": {
     "visitorStoreEmpty": "Returns true when visitorStore.count() === 0",
     "visitorStoreHydrated": "Returns true when visitorStore.count() > 0",
-    "candidateStillLocked": "Returns true when the barcode candidate value has not changed or been lost during the 800ms hold window"
+    "candidateStillLocked": "Returns true when the barcode candidate value has not changed or been lost during the 800ms hold window",
+    "hasPendingAttendance": "Returns true when event.pendingCount > 0 (caller pre-fetches via countPendingAttendance() before dispatching RESET_INITIATED)",
+    "noPendingAttendance": "Returns true when event.pendingCount === 0 (caller pre-fetches via countPendingAttendance() before dispatching RESET_INITIATED)"
   },
 
   "actions": {
@@ -317,6 +368,10 @@
     "flashAmber": "Triggers Zone 1 frame amber flash CSS animation class",
     "updateStoredToken": "Writes new accessToken and tokenIssuedAt to sessionStateStore; preserves refreshToken if absent from response",
     "showReauthError": "Renders re-auth failure message in sync overlay with retry button",
-    "showSyncError": "Renders sync failure message in sync overlay with specific HTTP error label and retry button"
+    "showSyncError": "Renders sync failure message in sync overlay with specific HTTP error label and retry button",
+    "setRetriggerPicker": "Sets context.retriggerPicker = true so AWAITING_SELECTION auto-opens the Picker on next entry",
+    "openPickerIfRetrigger": "If context.retriggerPicker === true, programmatically opens the Google Picker; always paired with clearRetriggerPicker on CONFIRMING_SELECTION entry",
+    "clearRetriggerPicker": "Resets context.retriggerPicker = false once the Picker has been re-opened or a fresh selection has been made",
+    "storeSyncedCount": "Writes event.syncedCount into context.syncedCount on PUSH_SUCCESS so the SYNC_SUCCESS screen can display the number of records pushed to Drive"
   }
 }

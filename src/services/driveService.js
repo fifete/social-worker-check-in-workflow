@@ -133,10 +133,14 @@ export async function batchUpdateAttendance(workingFileId, updates) {
   const headers = await authHeaders();
   const url = `${SHEETS_BASE}/${workingFileId}/values:batchUpdate`;
 
-  const data = updates.map(({ rowIndex, columnLetter }) => ({
-    range:  `${SHEET_TAB}!${columnLetter}${rowIndex}`,
-    values: [['TRUE']],
-  }));
+  // Always write the header to row 1 — idempotent if column existed, creates it if appended
+  const data = [
+    { range: `${SHEET_TAB}!${updates[0].columnLetter}1`, values: [['ASISTENCIA']] },
+    ...updates.map(({ rowIndex, columnLetter }) => ({
+      range:  `${SHEET_TAB}!${columnLetter}${rowIndex}`,
+      values: [['Si']],
+    })),
+  ];
 
   let response;
   try {

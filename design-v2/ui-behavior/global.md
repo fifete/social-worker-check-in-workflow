@@ -217,3 +217,22 @@ During `SYNCING`, a full-screen overlay (`position: fixed, inset: 0`) is rendere
 - Color is never the sole indicator of state; every color state change is accompanied by a label or icon change
 - Result list rows use `role="listitem"` and the parent uses `role="list"`
 - Scanner status announcements use `aria-live="polite"` for non-urgent states and `aria-live="assertive"` for errors
+
+---
+
+## Global Controls
+
+### "Cambiar archivo" button
+Provides an escape hatch to restart file selection without completing a sync.
+
+| Property | Value |
+|---|---|
+| Visible during | All `ATTENDANCE_PHASE` sub-states: `READY_EMPTY`, `MULTI_MATCH`, `CONFIRMED_MATCH` |
+| Hidden during | `AUTH_PENDING`, `FILE_PICKER_PENDING`, `SYNCING`, `RESET_WARNING`, `RESETTING` |
+| Placement | Zone 3, directly below "Sincronizar Datos con Drive", visible only in `READY_EMPTY` |
+| Style | Ghost (text-only), `--color-text-secondary`, no background, no border |
+| Minimum touch target | 56px tall, full-width |
+| Label | **"Cambiar archivo"** |
+| Action | Dispatches `RESET_INITIATED` |
+
+**Rationale:** Ghost style de-emphasizes this destructive-adjacent action relative to the primary sync button. The button must be reachable without scrolling when `READY_EMPTY` renders, but its low visual weight ensures the worker's eye goes to sync first.

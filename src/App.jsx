@@ -30,6 +30,17 @@ export default function App() {
   // Track which SYNCING sub-states we've already handled to prevent double-firing
   const handledSyncState = useRef(null);
 
+  // ─── Derived state values ─────────────────────────────────────────────────
+  const isAttendance   = state.matches('ATTENDANCE_PHASE');
+  const isSyncing      = state.matches('SYNCING');
+  const isResetWarning = state.matches('RESET_WARNING');
+  const isResetting    = state.matches('RESETTING');
+  const isSyncSuccess  = state.matches('SYNC_SUCCESS');
+  const attendanceValue = isAttendance ? state.value.ATTENDANCE_PHASE : null;
+  const appFlowState    = attendanceValue?.appFlow  ?? null;
+  const scannerState    = attendanceValue?.scanner  ?? null;
+  const { context }     = state;
+
   // ─── Boot sequence (runs once) ────────────────────────────────────────────
   useEffect(() => {
     (async () => {
@@ -72,6 +83,10 @@ export default function App() {
   // ─── Setup phase orchestration ────────────────────────────────────────────
   const setupStateKey = JSON.stringify(state.value);
   useEffect(() => {
+    if (state.matches({ FILE_PICKER_PENDING: 'AWAITING_SELECTION' }) && state.context.retriggerPicker) {
+      openGooglePicker();
+    }
+
     if (state.matches({ FILE_PICKER_PENDING: 'CHECKING_COLLISION' })) {
       (async () => {
         try {
@@ -128,6 +143,14 @@ export default function App() {
     }
   }, [setupStateKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ─── Reset phase orchestration ────────────────────────────────────────────
+  useEffect(() => {
+    if (!isResetting) return;
+    visitorService.resetSession()
+      .then(() => send({ type: 'RESET_COMPLETE' }))
+      .catch(() => send({ type: 'RESET_COMPLETE' })); // always complete; data is local
+  }, [isResetting]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ─── Sync phase orchestration ─────────────────────────────────────────────
   useEffect(() => {
     if (!state.matches('SYNCING')) {
@@ -171,7 +194,7 @@ export default function App() {
         const pending = await visitorService.getPendingSyncRecords().catch(() => []);
         if (pending.length === 0) {
           // No pending records — still purge to reset (graceful path)
-          send({ type: 'PUSH_SUCCESS' });
+          send({ type: 'PUSH_SUCCESS', syncedCount: 0 });
           return;
         }
         const session = await visitorService.readSession().catch(() => null);
@@ -185,7 +208,7 @@ export default function App() {
         }));
         try {
           await driveService.batchUpdateAttendance(session.workingFileId, updates);
-          send({ type: 'PUSH_SUCCESS' });
+          send({ type: 'PUSH_SUCCESS', syncedCount: pending.length });
         } catch (err) {
           const msg = SYNC_PUSH_MESSAGES[err?.code] ?? 'Error al sincronizar. Intente de nuevo más tarde.';
           send({ type: 'PUSH_FAILED', message: msg });
@@ -262,13 +285,10 @@ export default function App() {
     }
   }
 
-  // ─── Derived state values ─────────────────────────────────────────────────
-  const isAttendance = state.matches('ATTENDANCE_PHASE');
-  const isSyncing    = state.matches('SYNCING');
-  const attendanceValue = isAttendance ? state.value.ATTENDANCE_PHASE : null;
-  const appFlowState    = attendanceValue?.appFlow  ?? null;
-  const scannerState    = attendanceValue?.scanner  ?? null;
-  const { context }     = state;
+  async function handleChangeFile() {
+    const pendingCount = await visitorService.countPendingAttendance().catch(() => 0);
+    send({ type: 'RESET_INITIATED', pendingCount });
+  }
 
   // ─── Loading guard ────────────────────────────────────────────────────────
   if (!bootDone) {
@@ -321,7 +341,9 @@ export default function App() {
           />
         </div>
 
-        <div style={{ height: '25vh', minHeight: 0, flexShrink: 0 }}>
+        <div style={appFlowState === 'MULTI_MATCH'
+          ? { flex: '1', minHeight: 0, overflow: 'hidden' }
+          : { flexShrink: 0 }}>
           <Zone2Search
             appFlowState={appFlowState}
             send={send}
@@ -330,18 +352,17 @@ export default function App() {
           />
         </div>
 
-        <div className="flex-1 overflow-y-auto">
-          <Zone3Actions
-            appFlowState={appFlowState}
-            send={send}
-            selectedVisitor={context.selectedVisitor}
-            syncError={context.syncError}
-            reauthError={context.reauthError}
-          />
-        </div>
-
-        {isSyncing && (
-          <SyncOverlay state={state} send={send} />
+        {appFlowState !== 'MULTI_MATCH' && (
+          <div className="flex-1 overflow-y-auto">
+            <Zone3Actions
+              appFlowState={appFlowState}
+              send={send}
+              selectedVisitor={context.selectedVisitor}
+              syncError={context.syncError}
+              reauthError={context.reauthError}
+              onChangeFile={handleChangeFile}
+            />
+          </div>
         )}
 
         <Toast
@@ -353,12 +374,135 @@ export default function App() {
     );
   }
 
-  // SYNCING state (overlay handled inside ATTENDANCE_PHASE branch above;
-  // machine always re-enters ATTENDANCE_PHASE via SYNC_INITIATED from there)
-  return null;
+  // ─── SYNCING ───────────────────────────────────────────────────────────────
+  if (isSyncing) {
+    return <SyncOverlay state={state} send={send} />;
+  }
+
+  // ─── RESET_WARNING ─────────────────────────────────────────────────────────
+  if (isResetWarning) {
+    return <ResetWarningModal pendingCount={context.pendingAttendanceCount} send={send} />;
+  }
+
+  // ─── RESETTING ─────────────────────────────────────────────────────────────
+  if (isResetting) {
+    return <ResettingScreen />;
+  }
+  // ─── SYNC_SUCCESS ──────────────────────────────────────────────────
+  if (isSyncSuccess) {
+    return <SyncSuccessScreen count={context.syncedCount} send={send} />;
+  }}
+
+// ─── Sync success screen ──────────────────────────────────────────────────────
+function SyncSuccessScreen({ count, send }) {
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0,
+        background: 'var(--color-bg-page)',
+        zIndex: 60,
+        display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center',
+        padding: '24px', gap: 24,
+      }}>
+      <span style={{ fontSize: 64 }} aria-hidden="true">✅</span>
+      <div className="flex flex-col items-center gap-2 text-center">
+        <h1 className="text-2xl font-bold" style={{ color: 'var(--color-text-primary)' }}>
+          ¡Sincronización completa!
+        </h1>
+        <p className="text-base" style={{ color: 'var(--color-text-secondary)' }}>
+          {count > 0
+            ? `${count}\u00a0registro${count !== 1 ? 's' : ''} actualizado${count !== 1 ? 's' : ''} en Google Drive.`
+            : 'No había registros pendientes de sincronización.'}
+        </p>
+      </div>
+      <button
+        onClick={() => send({ type: 'SYNC_ACKNOWLEDGED' })}
+        className="w-full h-14 rounded-lg text-base font-semibold focus:outline-none focus:ring-2 focus:ring-offset-2"
+        style={{ maxWidth: 400, background: 'var(--color-primary)', color: 'var(--color-text-inverse)' }}>
+        Continuar
+      </button>
+    </div>
+  );
 }
 
-// ─── Auth screen ────────────────────────────────────────────────────────────
+// ─── Reset warning modal (bottom-sheet) ─────────────────────────────────────
+function ResetWarningModal({ pendingCount, send }) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Confirmar cambio de archivo"
+      style={{
+        position: 'fixed', inset: 0,
+        background: 'var(--color-bg-overlay)',
+        zIndex: 60,
+        display: 'flex', flexDirection: 'column',
+        justifyContent: 'flex-end',
+      }}>
+      <div className="p-6 flex flex-col gap-4 rounded-t-2xl"
+        style={{ background: 'var(--color-bg-page)' }}>
+        <div className="flex items-center gap-2">
+          <span style={{ fontSize: 22 }} aria-hidden="true">⚠️</span>
+          <h2 className="text-xl font-bold" style={{ color: 'var(--color-text-primary)' }}>
+            ¿Cambiar archivo?
+          </h2>
+        </div>
+        <p className="text-base" style={{ color: 'var(--color-text-secondary)' }}>
+          Tiene{' '}
+          <span className="font-bold" style={{ color: 'var(--color-danger-text)' }}>
+            {pendingCount} registro{pendingCount !== 1 ? 's' : ''} de asistencia
+          </span>{' '}
+          que no han sido sincronizados con Google Drive. Si cambia el archivo ahora, estos registros se perderán de forma permanente.
+        </p>
+        <div className="flex flex-col gap-3">
+          <button
+            onClick={() => send({ type: 'RESET_CONFIRMED' })}
+            className="w-full h-14 rounded-lg text-base font-semibold focus:outline-none focus:ring-2 focus:ring-offset-2"
+            style={{ background: 'var(--color-danger)', color: 'var(--color-text-inverse)' }}>
+            Sí, cambiar archivo
+          </button>
+          <button
+            onClick={() => send({ type: 'RESET_CANCELLED' })}
+            className="w-full h-14 rounded-lg text-base font-semibold border-2 focus:outline-none focus:ring-2 focus:ring-offset-2"
+            style={{ borderColor: 'var(--color-primary)', color: 'var(--color-primary)', background: 'transparent' }}>
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Resetting screen ────────────────────────────────────────────────────────
+function ResettingScreen() {
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0,
+        background: 'var(--color-bg-overlay)',
+        zIndex: 60,
+        display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center',
+        gap: 16,
+      }}>
+      <div
+        style={{
+          width: 48, height: 48,
+          borderRadius: '50%',
+          border: '4px solid rgba(255,255,255,0.3)',
+          borderTopColor: '#fff',
+          animation: 'spin 0.8s linear infinite',
+        }}
+        aria-hidden="true"
+      />
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <p className="text-xl font-bold" style={{ color: 'var(--color-text-inverse)' }}>
+        Cambiando archivo...
+      </p>
+    </div>
+  );
+}
 function AuthScreen({ send }) {
   const [authError, setAuthError] = useState(null);
   const [signing, setSigning]     = useState(false);
@@ -433,7 +577,8 @@ function SetupScreen({ state, send, context, onOpenPicker }) {
     state.matches({ FILE_PICKER_PENDING: 'COPYING_FILE' })       ||
     state.matches({ FILE_PICKER_PENDING: 'FETCHING_DATA' });
 
-  const isCollision = state.matches({ FILE_PICKER_PENDING: 'COLLISION_PROMPT' });
+  const isCollision  = state.matches({ FILE_PICKER_PENDING: 'COLLISION_PROMPT' });
+  const isConfirming = state.matches({ FILE_PICKER_PENDING: 'CONFIRMING_SELECTION' });
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen p-6 gap-4">
@@ -483,7 +628,39 @@ function SetupScreen({ state, send, context, onOpenPicker }) {
         </div>
       )}
 
-      {!isLoading && !isCollision && (
+      {isConfirming && (
+        <div className="w-full max-w-sm flex flex-col gap-4 mt-4">
+          <p className="text-sm font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+            Paso 1 de 2: Confirmar planilla
+          </p>
+          <p className="text-lg font-bold text-center" style={{ color: 'var(--color-text-primary)' }}>
+            ¿Es este el archivo correcto?
+          </p>
+          <p className="text-base font-semibold text-center p-3 rounded-lg"
+            style={{
+              background: 'var(--color-bg-card)',
+              border: '1px solid var(--color-border)',
+              color: 'var(--color-text-primary)',
+              wordBreak: 'break-word',
+            }}>
+            {context.masterFileName}
+          </p>
+          <button
+            onClick={() => send({ type: 'FILE_CONFIRMED' })}
+            className="w-full h-14 rounded-lg text-base font-semibold focus:outline-none focus:ring-2 focus:ring-offset-2"
+            style={{ background: 'var(--color-primary)', color: 'var(--color-text-inverse)' }}>
+            Continuar
+          </button>
+          <button
+            onClick={() => send({ type: 'FILE_REJECTED' })}
+            className="w-full h-14 rounded-lg text-base font-semibold border-2 focus:outline-none focus:ring-2 focus:ring-offset-2"
+            style={{ borderColor: 'var(--color-primary)', color: 'var(--color-primary)', background: 'transparent' }}>
+            Cambiar archivo
+          </button>
+        </div>
+      )}
+
+      {!isLoading && !isCollision && !isConfirming && (
         <div className="w-full max-w-sm flex flex-col gap-4 mt-4">
           <p className="text-sm font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
             Paso 1 de 2: Seleccionar planilla

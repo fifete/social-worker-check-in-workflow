@@ -148,3 +148,79 @@ None. All buttons are hidden or disabled during loading.
 - Error message text matches the failure path that triggered it (copy failure vs. fetch failure vs. collision check failure)
 - "Reintentar" is ≥56px tall
 - Previous step buttons are not duplicated
+
+---
+
+## Story 7: FILE_PICKER_PENDING — CONFIRMING_SELECTION
+
+**State name:** `FILE_PICKER_PENDING / CONFIRMING_SELECTION`
+
+**Zone layout:** Full-screen single column
+
+### Rendered elements (top to bottom)
+| Element | Copy / Value |
+|---|---|
+| Step indicator | "Paso 1 de 2: Confirmar planilla" |
+| Question heading | "¿Es este el archivo correcto?" |
+| File name display | "{masterFileName}" (verbatim from Picker result) |
+| Confirm button | "Continuar" |
+| Reject button | "Cambiar archivo" |
+
+### Interactive elements
+- "Continuar" → dispatches `FILE_CONFIRMED` → state proceeds to `CHECKING_COLLISION`
+- "Cambiar archivo" → dispatches `FILE_REJECTED` → Picker re-opens immediately (no intermediate idle screen)
+
+### Pass criteria
+- File name renders verbatim (no truncation for names under 60 characters)
+- "Continuar" is ≥56px tall, primary style (`--color-primary` background)
+- "Cambiar archivo" is ≥56px tall, secondary/outlined style (neutral — this is not a destructive action)
+- No network request is made while this screen is visible
+- Tapping "Cambiar archivo" opens the Picker within one event loop
+
+### Fail criteria
+- File name is absent or shows placeholder text
+- Either button is below the 56px minimum touch target
+- A loading spinner is shown (this step has no async operations)
+
+---
+
+## Story 8: RESET_WARNING — pending records present
+
+**State name:** `RESET_WARNING`
+
+**Zone layout:** Bottom-sheet modal overlay above `ATTENDANCE_PHASE`
+
+### Context
+Reached only when `hasPendingAttendance` is true (at least one record has `attendanceStatus === true AND syncedWithCloud === false`). When `hasPendingAttendance` is false, the machine skips this state and enters `RESETTING` directly.
+
+### Rendered elements
+| Element | Copy / Value |
+|---|---|
+| Overlay background | Semi-transparent black (`--color-bg-overlay`) |
+| Bottom sheet | Anchored to viewport bottom |
+| Warning icon | ⚠ (amber, `--color-warning`) |
+| Heading | "¿Cambiar archivo?" |
+| Body | "Tiene **[N] registro(s) de asistencia** que no han sido sincronizados con Google Drive. Si cambia el archivo ahora, estos registros se perderán de forma permanente." |
+| Cancel button | "Cancelar" |
+| Confirm button | "Sí, cambiar archivo" |
+
+`[N]` is the actual count of pending unsynced records, rendered bold.
+
+### Interactive elements
+- "Cancelar" → dispatches `RESET_CANCELLED` → modal dismisses, `ATTENDANCE_PHASE` resumes unchanged
+- "Sí, cambiar archivo" → dispatches `RESET_CONFIRMED` → machine enters `RESETTING`
+- Tapping outside the bottom sheet: no action (modal does not self-dismiss)
+
+### Pass criteria
+- `[N]` displays the correct pending record count (not zero, not a placeholder)
+- "Sí, cambiar archivo" uses `--color-danger` background with `--color-text-inverse` text
+- "Cancelar" is secondary/outlined (non-destructive path is visually emphasized)
+- Both buttons are ≥56px tall
+- All attendance zone interactions are blocked (pointer-events: none on underlying content)
+- Modal does not dismiss on outside tap
+
+### Fail criteria
+- Modal dismisses without explicit user action
+- `[N]` shows zero or an incorrect count
+- "Sí, cambiar archivo" is not styled as a danger action
+- Attendance zones remain interactive while modal is visible

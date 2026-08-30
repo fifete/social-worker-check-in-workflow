@@ -98,17 +98,27 @@ Overlay label updates to:
 ### Step 7 — Purge all stores
 Issue `visitorStore.clear()` and `sessionStateStore.clear()` within a single IndexedDB `readwrite` transaction spanning both stores.
 
-**On success:** Dispatch `PURGE_COMPLETE` → state machine transitions to `AUTH_PENDING`.
+**On success:** Dispatch `PURGE_COMPLETE` → state machine transitions to `SYNC_SUCCESS` (Step 8).
 
-Sync overlay dismissed. App renders the auth screen (Phase 1 reset).
+Sync overlay dismissed. Success screen renders.
 
-**Failure path:** If the purge transaction fails, log the error. Do NOT re-push data. Show persistent warning banner:
+**Failure path:** If the purge transaction fails, log the error. Do NOT re-push data. Show persistent warning toast. Still dispatch `PURGE_COMPLETE` to transition to `SYNC_SUCCESS` — Drive data is correct and the inconsistency is local only.
 
-> "Los datos se sincronizaron correctamente con Drive, pero no se pudo limpiar el almacenamiento local. Recargue la aplicación."
+### Step 8 — Confirm sync result (SYNC_SUCCESS)
+A full-screen success view replaces the sync overlay. All sync and attendance interactions remain disabled. The screen shows:
 
-Data integrity is preserved — the Drive copy is accurate. The inconsistency is local only.
+> ¡Sincronización completa!
+> [N] registro(s) actualizado(s) en Google Drive.
 
-### Step 8 — Handle non-200 HTTP from batchUpdate
+Where N is the `syncedCount` value stored in machine context during Step 5. A single prominent button:
+
+> **Continuar**
+
+Tapping it dispatches `SYNC_ACKNOWLEDGED` → state machine transitions to `AUTH_PENDING`.
+
+App renders the auth screen (Phase 1 reset). The worker must re-authenticate to start the next event.
+
+### Step 9 — Handle non-200 HTTP from batchUpdate
 Dispatch `PUSH_FAILED`. Dismiss sync overlay. Return to `ATTENDANCE_PHASE`. Show persistent error banner with a message specific to the HTTP status:
 
 | HTTP status | User-facing message |
@@ -131,4 +141,5 @@ The sync button remains available. All `syncedWithCloud: false` records remain i
 | Step 3 | Auth popup cancelled or fails | AUTH_FAILED; return to ATTENDANCE_PHASE with error banner |
 | Step 5 | Network error | PUSH_FAILED; return to ATTENDANCE_PHASE with specific error |
 | Step 6 | HTTP 4xx/5xx | PUSH_FAILED; return to ATTENDANCE_PHASE with status-specific error |
-| Step 7 | Purge transaction fails | Log error; show warning banner — Drive data is already correct |
+| Step 7 | Purge transaction fails | Log error; show warning toast; still transition to SYNC_SUCCESS — Drive data is already correct |
+| Step 8 | (no failure path) | Success screen is terminal; no errors possible |

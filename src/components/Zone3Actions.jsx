@@ -18,6 +18,7 @@ export default function Zone3Actions({
   selectedVisitor,
   syncError,
   reauthError,
+  onChangeFile,
 }) {
   const [attendanceError, setAttendanceError] = useState(null);
   const [undoError, setUndoError]             = useState(null);
@@ -57,6 +58,13 @@ export default function Zone3Actions({
             background:  'transparent',
           }}>
           Sincronizar Datos con Drive
+        </button>
+
+        <button
+          onClick={onChangeFile}
+          className="w-full h-14 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-offset-2"
+          style={{ color: 'var(--color-text-secondary)', background: 'transparent', border: 'none' }}>
+          Cambiar archivo
         </button>
       </div>
     );

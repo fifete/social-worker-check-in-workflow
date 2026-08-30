@@ -6,15 +6,18 @@ export const checkInMachine = createMachine(
     id: 'checkInApp',
     initial: 'AUTH_PENDING',
     context: {
-      masterFileId:   null,
-      masterFileName: null,
-      orphanFileId:   null,
-      selectedVisitor: null,
-      scanCandidate:  null,
-      setupError:     null,
-      syncError:      null,
-      reauthError:    null,
-      toastPending:   false,
+      masterFileId:          null,
+      masterFileName:        null,
+      orphanFileId:          null,
+      selectedVisitor:       null,
+      scanCandidate:         null,
+      setupError:            null,
+      syncError:             null,
+      reauthError:           null,
+      toastPending:          false,
+      retriggerPicker:       false,
+      pendingAttendanceCount: 0,
+      syncedCount:            0,
     },
 
     states: {
@@ -31,10 +34,21 @@ export const checkInMachine = createMachine(
         initial: 'AWAITING_SELECTION',
         states: {
           AWAITING_SELECTION: {
+            entry: 'openPickerIfRetrigger',
             on: {
               FILE_PICKED: {
-                target: 'CHECKING_COLLISION',
+                target: 'CONFIRMING_SELECTION',
                 actions: 'storeMasterFileId',
+              },
+            },
+          },
+          CONFIRMING_SELECTION: {
+            entry: 'clearRetriggerPicker',
+            on: {
+              FILE_CONFIRMED: 'CHECKING_COLLISION',
+              FILE_REJECTED: {
+                target: 'AWAITING_SELECTION',
+                actions: 'setRetriggerPicker',
               },
             },
           },
@@ -153,6 +167,23 @@ export const checkInMachine = createMachine(
                     target: 'READY_EMPTY',
                     actions: 'resetSearchAndSelection',
                   },
+                  // Typing a new search while a card is showing replaces it inline
+                  SEARCH_RESULTS_MULTIPLE: {
+                    target: 'MULTI_MATCH',
+                    actions: 'clearSearch',
+                  },
+                  SEARCH_RESULT_SINGLE: {
+                    target: 'CONFIRMED_MATCH',
+                    actions: 'setSelectedVisitor',
+                  },
+                  SEARCH_CLEARED: {
+                    target: 'READY_EMPTY',
+                    actions: 'resetSearchAndSelection',
+                  },
+                  SEARCH_NO_RESULTS: {
+                    target: 'READY_EMPTY',
+                    actions: 'resetSearchAndSelection',
+                  },
                 },
               },
             },
@@ -217,6 +248,29 @@ export const checkInMachine = createMachine(
 
         on: {
           SYNC_INITIATED: '#checkInApp.SYNCING',
+          RESET_INITIATED: [
+            { guard: 'hasPendingAttendance', target: '#checkInApp.RESET_WARNING', actions: 'storePendingCount' },
+            { guard: 'noPendingAttendance',  target: '#checkInApp.RESETTING' },
+          ],
+        },
+      },
+
+      RESET_WARNING: {
+        on: {
+          RESET_CONFIRMED: '#checkInApp.RESETTING',
+          RESET_CANCELLED: '#checkInApp.ATTENDANCE_PHASE',
+        },
+      },
+
+      RESETTING: {
+        on: {
+          RESET_COMPLETE: '#checkInApp.FILE_PICKER_PENDING',
+        },
+      },
+
+      SYNC_SUCCESS: {
+        on: {
+          SYNC_ACKNOWLEDGED: '#checkInApp.AUTH_PENDING',
         },
       },
 
@@ -243,7 +297,10 @@ export const checkInMachine = createMachine(
           },
           PUSHING_DATA: {
             on: {
-              PUSH_SUCCESS: 'PURGING_STORES',
+              PUSH_SUCCESS: {
+                target: 'PURGING_STORES',
+                actions: 'storeSyncedCount',
+              },
               PUSH_FAILED: {
                 target: '#checkInApp.ATTENDANCE_PHASE',
                 actions: 'showSyncError',
@@ -252,7 +309,7 @@ export const checkInMachine = createMachine(
           },
           PURGING_STORES: {
             on: {
-              PURGE_COMPLETE: '#checkInApp.AUTH_PENDING',
+              PURGE_COMPLETE: '#checkInApp.SYNC_SUCCESS',
             },
           },
         },
@@ -264,6 +321,8 @@ export const checkInMachine = createMachine(
       visitorStoreEmpty:    ({ event }) => (event.visitorCount ?? 0) === 0,
       visitorStoreHydrated: ({ event }) => (event.visitorCount ?? 0) > 0,
       candidateStillLocked: ({ context }) => context.scanCandidate !== null,
+      hasPendingAttendance: ({ event }) => (event.pendingCount ?? 0) > 0,
+      noPendingAttendance:  ({ event }) => (event.pendingCount ?? 0) === 0,
     },
     actions: {
       storeMasterFileId: assign(({ event }) => ({
@@ -326,6 +385,11 @@ export const checkInMachine = createMachine(
           event.message ?? 'Error al sincronizar. Intente de nuevo más tarde.',
         reauthError: null,
       }),
+      setRetriggerPicker:   assign({ retriggerPicker: true }),
+      clearRetriggerPicker: assign({ retriggerPicker: false }),
+      openPickerIfRetrigger: () => {}, // App.jsx reads context.retriggerPicker and calls openGooglePicker
+      storePendingCount: assign({ pendingAttendanceCount: ({ event }) => event.pendingCount ?? 0 }),
+      storeSyncedCount:  assign({ syncedCount: ({ event }) => event.syncedCount ?? 0 }),
     },
   }
 );

@@ -59,7 +59,7 @@ export default function Zone2Search({
       setRawCount(0);
       setNoResults(false);
       setSearchError(null);
-      if (trimmed.length === 0 && (appFlowState === 'MULTI_MATCH')) {
+      if (appFlowState === 'MULTI_MATCH' || appFlowState === 'CONFIRMED_MATCH') {
         send({ type: 'SEARCH_CLEARED' });
       }
       return;
@@ -96,7 +96,7 @@ export default function Zone2Search({
     const trimmed = query.trim();
 
     if (trimmed.length < 3) {
-      if (trimmed.length === 0 && appFlowState === 'MULTI_MATCH') {
+      if (appFlowState === 'MULTI_MATCH' || appFlowState === 'CONFIRMED_MATCH') {
         send({ type: 'SEARCH_CLEARED' });
       }
       setResults([]);
@@ -120,7 +120,7 @@ export default function Zone2Search({
   const showList = appFlowState === 'MULTI_MATCH' && results.length > 0;
 
   return (
-    <div className="flex flex-col h-full px-4 pt-3 pb-2 gap-2"
+    <div className={`flex flex-col ${appFlowState === 'MULTI_MATCH' ? 'h-full' : ''} px-4 pt-3 pb-2 gap-2`}
       style={{ background: 'var(--color-bg-page)', borderTop: '1px solid var(--color-border)' }}>
 
       {/* Search input */}

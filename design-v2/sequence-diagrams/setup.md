@@ -1,8 +1,10 @@
-> What this file answers: How does the app go from a freshly authenticated worker to a fully hydrated visitorStore ready for attendance, including the _ASISTENCIA collision path?
+> What this file answers: How does the app go from a freshly authenticated worker (or a reset session with a valid token) to a fully hydrated visitorStore ready for attendance, including the file confirmation step and the _ASISTENCIA collision path?
 
 ---
 
 ## Named Steps
+
+> **Entry points:** Steps 1–2 are skipped when entering from the `RESETTING` path (the worker already has a valid token). In that case, execution begins at Step 3 with `FILE_PICKER_PENDING / AWAITING_SELECTION` already active.
 
 ### Step 1 — Trigger Google sign-in
 The worker taps "Iniciar sesión con Google" on the `AUTH_PENDING` screen.
@@ -62,9 +64,24 @@ The app extracts from `response[google.picker.Response.DOCUMENTS][0]`:
 - `masterFileId = document[google.picker.Document.ID]`
 - `masterFileName = document[google.picker.Document.NAME]`
 
-Dispatch `FILE_PICKED` → state transitions to `FILE_PICKER_PENDING / CHECKING_COLLISION`.
+Dispatch `FILE_PICKED` → state transitions to `FILE_PICKER_PENDING / CONFIRMING_SELECTION`.
 
-### Step 5 — Collision check: search for existing _ASISTENCIA file
+### Step 5 — Confirm selected file
+State is now `FILE_PICKER_PENDING / CONFIRMING_SELECTION`. The app displays the selected file name prominently before any Drive operation begins.
+
+**Rendered copy:**
+
+> **"¿Es este el archivo correcto?"**
+> "{masterFileName}"
+>
+> [**"Continuar"**] [**"Cambiar archivo"**]
+
+- Worker taps **"Continuar":** Dispatch `FILE_CONFIRMED` → state transitions to `FILE_PICKER_PENDING / CHECKING_COLLISION`.
+- Worker taps **"Cambiar archivo":** Dispatch `FILE_REJECTED` → state transitions back to `FILE_PICKER_PENDING / AWAITING_SELECTION` with `retriggerPicker = true`. The Picker re-opens immediately without requiring an additional tap.
+
+**No failure path.** This step involves no network calls and cannot fail.
+
+### Step 6 — Collision check: search for existing _ASISTENCIA file
 **This step must execute before any Drive copy call.**
 
 The app queries Drive for an existing file named exactly `{masterFileName}_ASISTENCIA` owned by the authenticated user:
@@ -79,7 +96,7 @@ Authorization: Bearer {accessToken}
 
 `corpora=user` is the Drive v3 default and scopes results to files the authenticated user owns or can access. The `owners` query term requires an explicit email address per the Drive v3 API docs — a `'me'` shorthand is not supported. The `trashed=false` filter excludes deleted files.
 
-**Outcome A — `files` array is empty:** Dispatch `COLLISION_NOT_FOUND` → proceed to Step 6.
+**Outcome A — `files` array is empty:** Dispatch `COLLISION_NOT_FOUND` → proceed to Step 7.
 
 **Outcome B — `files` array has one or more entries:** Store the first entry's `id` as the orphan file ID in transient context. Dispatch `COLLISION_FOUND` → state transitions to `FILE_PICKER_PENDING / COLLISION_PROMPT`.
 
@@ -89,8 +106,8 @@ Show modal prompt to worker:
 >
 > "Usar archivo existente" | "Crear copia nueva"
 
-- Worker taps **"Usar archivo existente"**: dispatch `USE_EXISTING_FILE`. Set `workingFileId` = orphan file ID. Write to `sessionStateStore`. Skip to Step 8.
-- Worker taps **"Crear copia nueva"**: dispatch `CREATE_NEW_COPY` → proceed to Step 5b.
+- Worker taps **"Usar archivo existente"**: dispatch `USE_EXISTING_FILE`. Set `workingFileId` = orphan file ID. Write to `sessionStateStore`. Skip to Step 9.
+- Worker taps **"Crear copia nueva"**: dispatch `CREATE_NEW_COPY` → proceed to Step 6b.
 
 **Failure path:** If the Drive search request fails (network error, 401, 403), dispatch `COLLISION_CHECK_FAILED`. Show:
 
@@ -98,15 +115,15 @@ Show modal prompt to worker:
 
 State returns to `FILE_PICKER_PENDING / AWAITING_SELECTION`.
 
-### Step 5b — Delete orphan file (conditional)
-Executed only when worker chose "Crear copia nueva" in Step 5.
+### Step 6b — Delete orphan file (conditional)
+Executed only when worker chose "Crear copia nueva" in Step 6.
 
 ```
 DELETE https://www.googleapis.com/drive/v3/files/{orphanFileId}
 Authorization: Bearer {accessToken}
 ```
 
-**Success (HTTP 204):** Dispatch `ORPHAN_DELETED` → proceed to Step 6.
+**Success (HTTP 204):** Dispatch `ORPHAN_DELETED` → proceed to Step 7.
 
 **Failure path:** Dispatch `DELETE_FAILED`. Show inline in the collision prompt:
 
@@ -114,7 +131,7 @@ Authorization: Bearer {accessToken}
 
 State remains `FILE_PICKER_PENDING / COLLISION_PROMPT`. Both options remain available.
 
-### Step 6 — Copy master file → _ASISTENCIA
+### Step 7 — Copy master file → _ASISTENCIA
 ```
 POST https://www.googleapis.com/drive/v3/files/{masterFileId}/copy
 Authorization: Bearer {accessToken}
@@ -134,7 +151,7 @@ Content-Type: application/json
 
 State returns to `FILE_PICKER_PENDING / AWAITING_SELECTION`.
 
-### Step 7 — Fetch all rows from working copy
+### Step 8 — Fetch all rows from working copy
 ```
 GET https://sheets.googleapis.com/v4/spreadsheets/{workingFileId}/values/Respuestas%20de%20formulario%201
 Authorization: Bearer {accessToken}
@@ -150,7 +167,7 @@ The tab name is the hardcoded literal `'Respuestas de formulario 1'` (URL-encode
 
 State returns to `FILE_PICKER_PENDING / AWAITING_SELECTION`.
 
-### Step 8 — Parse rows and hydrate visitorStore
+### Step 9 — Parse rows and hydrate visitorStore
 Map each data row (index 1..N) to the visitor schema using the column→key mapping defined in `index.md`. Header row is used to determine column positions by exact string match.
 
 For every mapped row, write a record to `visitorStore` with these defaults:
@@ -167,7 +184,7 @@ All writes are issued within a single IndexedDB `readwrite` transaction.
 
 State returns to `FILE_PICKER_PENDING / AWAITING_SELECTION`. Do not leave `visitorStore` in a partial state.
 
-### Step 9 — Transition to attendance phase
+### Step 10 — Transition to attendance phase
 Dispatch `HYDRATION_COMPLETE` → state machine transitions to `ATTENDANCE_PHASE / appFlow / READY_EMPTY`.
 
 The setup overlay is dismissed. Zone 2 search input receives focus.
@@ -181,8 +198,9 @@ The setup overlay is dismissed. Zone 2 search input receives focus.
 | Step 1 | Popup blocked | Inline error + retry button; no state change |
 | Step 2 | IDB write fails | Inline error; do not dispatch AUTH_SUCCESS |
 | Step 3 | GAPI load fails | Inline error + retry button |
-| Step 5 | Drive search fails | COLLISION_CHECK_FAILED; return to AWAITING_SELECTION |
-| Step 5b | Delete fails | DELETE_FAILED; return to COLLISION_PROMPT |
-| Step 6 | Copy fails | COPY_FAILED; return to AWAITING_SELECTION |
-| Step 7 | Fetch fails | FETCH_FAILED; return to AWAITING_SELECTION |
-| Step 8 | IDB transaction aborts | Abort + clear + inline error; return to AWAITING_SELECTION |
+| Step 5 | Worker rejects file | FILE_REJECTED; Picker re-opens immediately; no error shown |
+| Step 6 | Drive search fails | COLLISION_CHECK_FAILED; return to AWAITING_SELECTION |
+| Step 6b | Delete fails | DELETE_FAILED; return to COLLISION_PROMPT |
+| Step 7 | Copy fails | COPY_FAILED; return to AWAITING_SELECTION |
+| Step 8 | Fetch fails | FETCH_FAILED; return to AWAITING_SELECTION |
+| Step 9 | IDB transaction aborts | Abort + clear + inline error; return to AWAITING_SELECTION |

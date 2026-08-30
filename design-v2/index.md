@@ -125,6 +125,20 @@ All spec files, components, and services must use these exact strings. No synony
 | `READY_EMPTY` | `visitorStore` hydrated, no active search or selection |
 | `MULTI_MATCH` | Search returns 2–15 results |
 | `CONFIRMED_MATCH` | Single record selected from list or direct barcode hit |
+2| `RESET_WARNING` | Worker tapped "Cambiar archivo" with pending unsynced records present |
+| `RESETTING` | IDB clear in progress; token fields preserved; transitions to `FILE_PICKER_PENDING` on completion |
+| `SYNC_SUCCESS` | Sync complete; full-screen success view shows count of synced records; transitions to `AUTH_PENDING` when worker taps "Continuar" |
+
+**FILE_PICKER_PENDING sub-states:**
+| State name | Description |
+|---|---|
+| `AWAITING_SELECTION` | Picker open or idle; auto-opens Picker if entered via `FILE_REJECTED` |
+| `CONFIRMING_SELECTION` | File selected; worker reviews the file name before any Drive operation begins |
+| `CHECKING_COLLISION` | Drive search for existing `_ASISTENCIA` copy in progress |
+| `COLLISION_PROMPT` | Existing `_ASISTENCIA` found; worker chooses to reuse or replace it |
+| `DELETING_ORPHAN` | Deleting orphan `_ASISTENCIA` before re-copying |
+| `COPYING_FILE` | Drive copy of master → `_ASISTENCIA` in progress |
+| `FETCHING_DATA` | Spreadsheet rows being fetched from working copy |
 
 **Scanner sub-states (nested inside Zone 1):**
 | State name | Description |
