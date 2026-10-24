@@ -136,7 +136,8 @@ export default function App() {
           const rawRows = await driveService.fetchSheetData(workingFileId);
           await visitorService.hydrateFromRows(rawRows);
           send({ type: 'HYDRATION_COMPLETE' });
-        } catch {
+        } catch (err) {
+          console.error('FETCHING_DATA failed:', err);
           send({ type: 'FETCH_FAILED' });
         }
       })();

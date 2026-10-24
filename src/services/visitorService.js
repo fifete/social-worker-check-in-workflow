@@ -1,17 +1,18 @@
 import { openDatabase } from '../db/db.js';
 
-// Column header → schema key mapping (exact strings from index.md)
+// Column header → schema key. Matched after normalizeHeader(), so case, accents,
+// extra whitespace and trailing "(…)" qualifiers (e.g. "(EN MAYÚSCULA)") are ignored.
 const COLUMN_MAP = {
-  'NOAPELLIDOS Y NOMBRES COMPLETOS DEL ADOLESCENTE (MAYÚSCULA)': 'hostName',
-  'DOCUMENTO DE IDENTIDAD DEL ADOLESCENTE':                       'hostId',
-  'APELLIDOS Y NOMBRES COMPLETOS DEL VISITANTE (MAYÚSCULA)':      'visitorName',
-  'DOCUMENTO DE IDENTIDAD DEL VISITANTE':                         'visitorId',
-  'EDAD DEL VISITANTE':                                           'visitorAge',
-  'PARENTESCO CON EL ADOLESCENTE':                               'relationship',
-  'TIPO DE VISITA':                                               'visitType',
-  'DEPARTAMENTO DE RESIDENCIA DEL VISITANTE':                    'location.dept',
-  'PROVINCIA DE RESIDENCIA DEL VISITANTE':                       'location.prov',
-  'DISTRITO DE RESIDENCIA DEL VISITANTE':                        'location.dist',
+  'APELLIDOS Y NOMBRES COMPLETOS DEL ADOLESCENTE': 'hostName',
+  'DOCUMENTO DE IDENTIDAD DEL ADOLESCENTE':        'hostId',
+  'APELLIDOS Y NOMBRES COMPLETOS DEL VISITANTE':   'visitorName',
+  'DOCUMENTO DE IDENTIDAD DEL VISITANTE':          'visitorId',
+  'EDAD DEL VISITANTE':                            'visitorAge',
+  'PARENTESCO CON EL ADOLESCENTE':                 'relationship',
+  'TIPO DE VISITA':                                'visitType',
+  'DEPARTAMENTO DE RESIDENCIA DEL VISITANTE':      'location.dept',
+  'PROVINCIA DE RESIDENCIA DEL VISITANTE':         'location.prov',
+  'DISTRITO DE RESIDENCIA DEL VISITANTE':          'location.dist',
 };
 
 const REQUIRED_KEYS = new Set(['visitorId', 'visitorName']);
@@ -25,6 +26,14 @@ function colIndexToLetter(index) {
     n = Math.floor(n / 26) - 1;
   }
   return result;
+}
+
+function normalizeHeader(str) {
+  return normalize(str)
+    .replace(/\([^)]*\)?/g, ' ') // drop "(…)" qualifiers, even if unclosed
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function normalize(str) {
@@ -50,23 +59,25 @@ export async function hydrateFromRows(rawRows) {
   const headerRow = rawRows[0];
 
   // Build column index lookup
+  const normalizedMap = {};
+  for (const [header, key] of Object.entries(COLUMN_MAP)) {
+    normalizedMap[normalizeHeader(header)] = key;
+  }
   const colIndex = {};
   for (let c = 0; c < headerRow.length; c++) {
-    const header = headerRow[c];
-    if (header in COLUMN_MAP) {
-      colIndex[COLUMN_MAP[header]] = c;
-    }
+    const key = normalizedMap[normalizeHeader(headerRow[c])];
+    if (key && !(key in colIndex)) colIndex[key] = c;
   }
 
   // Validate required columns
   for (const key of REQUIRED_KEYS) {
     if (!(key in colIndex)) {
-      throw { code: 'HEADER_PARSE_FAILED' };
+      throw { code: 'HEADER_PARSE_FAILED', missing: key, headers: headerRow };
     }
   }
 
   // Determine ASISTENCIA column letter
-  const asistenciaHeaderIdx = headerRow.indexOf('ASISTENCIA');
+  const asistenciaHeaderIdx = headerRow.findIndex(h => normalizeHeader(h) === 'asistencia');
   const asistenciaColumn = asistenciaHeaderIdx !== -1
     ? colIndexToLetter(asistenciaHeaderIdx)
     : colIndexToLetter(headerRow.length); // append after last column
