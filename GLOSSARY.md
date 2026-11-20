@@ -36,6 +36,14 @@ _Avoid_: Attendance entry, registration, scan
 An attendance record that has been registered on the device but not yet written to the working copy.
 _Avoid_: Unsynced record, dirty record, queued record
 
+**Failed record**:
+A visitor whose attendance record could not be registered on the device or written to the working copy.
+_Avoid_: Lost record, bad row, error row
+
+**Log entry**:
+A note the app keeps about something that went wrong, so that the developers can see it later. It is kept on the device until its receipt has been confirmed.
+_Avoid_: Error report, event, log line
+
 ### Phases
 
 **Setup**:
