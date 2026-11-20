@@ -124,13 +124,21 @@
                 "BARCODE_RESULT": {
                   "target": "CONFIRMED_MATCH",
                   "actions": ["setSelectedVisitorFromBarcode"]
+                },
+                "SCAN_ATTENDANCE_RECORDED": {
+                  "target": "READY_EMPTY",
+                  "actions": ["scheduleToast", "resetSearchAndSelection"]
+                },
+                "SCAN_DUPLICATE": {
+                  "target": "CONFIRMED_MATCH",
+                  "actions": ["setSelectedVisitorFromBarcode", "scheduleDuplicateToast"]
                 }
               }
             },
 
             "MULTI_MATCH": {
               "meta": {
-                "description": "Search returns 2–15 results. Worker must tap one to select."
+                "description": "Search returns 2–15 results. Worker must tap one to select. A scan replaces the search."
               },
               "on": {
                 "VISITOR_SELECTED": {
@@ -149,6 +157,18 @@
                 "SEARCH_NO_RESULTS": {
                   "target": "READY_EMPTY",
                   "actions": ["showNoResults"]
+                },
+                "BARCODE_RESULT": {
+                  "target": "CONFIRMED_MATCH",
+                  "actions": ["setSelectedVisitorFromBarcode", "clearSearch"]
+                },
+                "SCAN_ATTENDANCE_RECORDED": {
+                  "target": "READY_EMPTY",
+                  "actions": ["scheduleToast", "clearSearch", "resetSearchAndSelection"]
+                },
+                "SCAN_DUPLICATE": {
+                  "target": "CONFIRMED_MATCH",
+                  "actions": ["setSelectedVisitorFromBarcode", "clearSearch", "scheduleDuplicateToast"]
                 }
               }
             },
@@ -178,6 +198,14 @@
                 "BARCODE_RESULT": {
                   "target": "CONFIRMED_MATCH",
                   "actions": ["setSelectedVisitorFromBarcode"]
+                },
+                "SCAN_ATTENDANCE_RECORDED": {
+                  "target": "READY_EMPTY",
+                  "actions": ["scheduleToast", "resetSearchAndSelection"]
+                },
+                "SCAN_DUPLICATE": {
+                  "target": "CONFIRMED_MATCH",
+                  "actions": ["setSelectedVisitorFromBarcode", "scheduleDuplicateToast"]
                 }
               }
             }
@@ -192,7 +220,13 @@
                 "description": "Camera active. No candidate in frame. Frame overlay visible with instructional label."
               },
               "on": {
-                "CANDIDATE_DETECTED": "CANDIDATE_DETECTED",
+                "CANDIDATE_DETECTED": {
+                  "target": "CANDIDATE_DETECTED",
+                  "guard": "candidateIsNotAcceptedCode"
+                },
+                "FRAME_EMPTY": {
+                  "actions": ["clearAcceptedCode"]
+                },
                 "CAMERA_PERMISSION_DENIED": "CAMERA_DENIED",
                 "BARCODE_DETECTOR_UNAVAILABLE": "FALLBACK_ACTIVE"
               }
@@ -216,9 +250,9 @@
 
             "SCAN_SUCCESS": {
               "meta": {
-                "description": "Lock confirmed. Frame flashes green. Haptic pulse fires. Audio chirp plays. Result dispatched."
+                "description": "Lock confirmed. Frame flashes green. Haptic pulse fires. Audio chirp plays. Result dispatched. The lookup then decides: unattended visitor → write + SCAN_ATTENDANCE_RECORDED; attended → SCAN_DUPLICATE; write failure → BARCODE_RESULT with registerFailed; unknown → pre-fill Zone 2."
               },
-              "entry": ["dispatchBarcodeResult", "flashGreen", "playChirp", "triggerHaptic"],
+              "entry": ["rememberAcceptedCode", "dispatchBarcodeResult", "flashGreen", "playChirp", "triggerHaptic"],
               "after": {
                 "600": "IDLE"
               }
@@ -248,7 +282,13 @@
                 "description": "BarcodeDetector API unavailable. @zxing loaded. Small non-intrusive fallback badge shown."
               },
               "on": {
-                "CANDIDATE_DETECTED": "CANDIDATE_DETECTED",
+                "CANDIDATE_DETECTED": {
+                  "target": "CANDIDATE_DETECTED",
+                  "guard": "candidateIsNotAcceptedCode"
+                },
+                "FRAME_EMPTY": {
+                  "actions": ["clearAcceptedCode"]
+                },
                 "CAMERA_PERMISSION_DENIED": "CAMERA_DENIED"
               }
             }
@@ -261,7 +301,10 @@
         "RESET_INITIATED": [
           { "guard": "hasPendingAttendance", "target": "#checkInApp.RESET_WARNING" },
           { "guard": "noPendingAttendance",  "target": "#checkInApp.RESETTING" }
-        ]
+        ],
+        "TOAST_UNDO_FAILED": {
+          "actions": ["scheduleUndoFailedToast"]
+        }
       }
     },
 
@@ -343,6 +386,7 @@
     "visitorStoreEmpty": "Returns true when visitorStore.count() === 0",
     "visitorStoreHydrated": "Returns true when visitorStore.count() > 0",
     "candidateStillLocked": "Returns true when the barcode candidate value has not changed or been lost during the 800ms hold window",
+    "candidateIsNotAcceptedCode": "Returns true when the candidate value differs from context.acceptedCode (the code that last reached SCAN_SUCCESS and has not yet left the frame)",
     "hasPendingAttendance": "Returns true when event.pendingCount > 0 (caller pre-fetches via countPendingAttendance() before dispatching RESET_INITIATED)",
     "noPendingAttendance": "Returns true when event.pendingCount === 0 (caller pre-fetches via countPendingAttendance() before dispatching RESET_INITIATED)"
   },
@@ -362,7 +406,11 @@
     "showNoResults": "Renders 'Sin resultados' label in Zone 2",
     "writeAttendanceToIDB": "Sets attendanceStatus=true, attendanceTimestamp=ISO-8601 now(), syncedWithCloud=false in visitorStore",
     "resetSearchAndSelection": "Clears search input, result list, and selected visitor from transient context",
-    "scheduleToast": "Queues a non-blocking success toast (3000ms display) naming the selected visitor. Must run before resetSearchAndSelection, which clears the visitor. Each call increments toast.id so back-to-back toasts retrigger.",
+    "scheduleToast": "Queues a non-blocking success toast (5000ms, with Deshacer) naming the visitor: selectedVisitor for the manual path, event.visitor for SCAN_ATTENDANCE_RECORDED. Must run before resetSearchAndSelection, which clears the visitor. Single toast slot: replaces any current toast. Each call increments toast.id so back-to-back toasts retrigger.",
+    "scheduleDuplicateToast": "Queues the duplicate-scan toast (3000ms, no Deshacer) naming event.visitor and showing its original attendanceTimestamp as HH:MM; replaces any current toast",
+    "scheduleUndoFailedToast": "Replaces the success toast with the undo-failed error toast (3000ms, no Deshacer) after a Deshacer write fails",
+    "rememberAcceptedCode": "Stores the scanned code in context.acceptedCode (re-scan guard)",
+    "clearAcceptedCode": "Resets context.acceptedCode to null once a processed frame has no candidate",
     "scheduleChirp": "Queues the Web Audio API confirmation chirp (non-blocking)",
     "clearAttendanceRecord": "Sets attendanceStatus=false, attendanceTimestamp=null, syncedWithCloud=false in visitorStore",
     "dispatchBarcodeResult": "Fires BARCODE_RESULT event on appFlow with decoded visitorId payload",

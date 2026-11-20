@@ -32,7 +32,8 @@ The overlay must be distinct enough to be visible against any background the cam
 **User interactions:** None. The scanner passively processes frames.
 
 **Transitions out:**
-- `CANDIDATE_DETECTED` — when the barcode detector reports a candidate
+- `CANDIDATE_DETECTED` — when the barcode detector reports a candidate other than the code held by the re-scan guard (see `SCAN_SUCCESS`)
+- `FRAME_EMPTY` — a processed frame has no candidate; clears the re-scan guard (no state change)
 - `CAMERA_PERMISSION_DENIED` — when the browser denies camera access
 - `BARCODE_DETECTOR_UNAVAILABLE` — when `'BarcodeDetector' in window` is false
 
@@ -76,6 +77,19 @@ The overlay must be distinct enough to be visible against any background the cam
 
 **Transitions out:**
 - After 600ms → `IDLE`
+
+**Registration on scan:** The feedback above confirms that the barcode was read, for every read. What happens to the visitor depends on the lookup of the scanned DNI:
+
+| Lookup result | Behaviour |
+|---|---|
+| Visitor, no attendance record yet | The attendance record is written at once (no tap on REGISTRAR ASISTENCIA). The app goes to `READY_EMPTY` and a success toast with **Deshacer** appears (see `global.md`). Zone 3 shows the `READY_EMPTY` placeholder, not the visitor card. |
+| Visitor, attendance record already exists | No write; the original timestamp is kept. The app goes to `CONFIRMED_MATCH` and Zone 3 shows the card with the "Asistencia Ya Registrada" badge (`stories/confirmed-match-states.md`, Story 3). The duplicate toast appears. |
+| Visitor, attendance write fails | The app goes to `CONFIRMED_MATCH` and Zone 3 shows the card with the inline error and the REGISTRAR ASISTENCIA button as a manual retry (Story 10). The error tone (220Hz) plays; no success toast. |
+| No such visitor | Unchanged: the scanned value is pre-filled into Zone 2. |
+
+A scan takes effect from any `ATTENDANCE_PHASE` app state (`READY_EMPTY`, `MULTI_MATCH`, `CONFIRMED_MATCH`) and replaces the current search or selection.
+
+**Re-scan guard:** Once a code has reached `SCAN_SUCCESS`, the scanner ignores that same code until a processed frame has no candidate in it. A card held in frame after `SCAN_SUCCESS` (600ms reset + 800ms hold ≈ 1.4s) therefore does not scan twice, and a duplicate toast is not repeated while the card stays up. Only a genuine re-presentation counts as a duplicate scan. The guard applies to every read code, including codes with no matching visitor. A different code is never suppressed.
 
 ---
 
@@ -148,6 +162,7 @@ Every error path in Zone 1 must surface a visible label inside Zone 1 itself. Th
 |---|---|
 | `CANDIDATE_DETECTED` → `SCAN_SUCCESS` (hold window) | 800ms (fixed) |
 | `SCAN_SUCCESS` → `IDLE` (auto reset) | 600ms |
+| Same code accepted again (re-scan guard) | Ignored until a frame has no candidate |
 | `SCAN_ERROR` → `IDLE` (auto reset) | 2000ms |
 | Frame color shift (IDLE → CANDIDATE_DETECTED) | Immediate (CSS) |
 | Green/amber flash overlay animation | 300ms |

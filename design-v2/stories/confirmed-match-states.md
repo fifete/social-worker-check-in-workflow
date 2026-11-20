@@ -164,11 +164,78 @@ Unchanged from Story 3, plus:
 ### Simultaneous async feedback
 | Event | Timing |
 |---|---|
-| Toast: "Asistencia registrada: [visitorName]" | Appears at bottom center ~100ms after transition |
+| Toast: "Asistencia registrada: [visitorName]" with **Deshacer** | Appears top right ~100ms after transition (see `global.md`) |
 | Audio chirp | Plays ~100ms after transition (non-blocking) |
 
 ### Pass criteria
 - Zone 2 and Zone 3 reset is **immediate** (same frame as state transition)
 - Toast and chirp may lag by up to 100–200ms — this is acceptable
 - No visitor data from the previous record is visible after reset
-- Toast disappears after 3000ms
+- Toast disappears after 5000ms unless replaced or dismissed with **Deshacer**
+
+---
+
+## Story 8: Scan — unattended visitor, auto-registered
+
+**State name:** Stays in or returns to `ATTENDANCE_PHASE / appFlow / READY_EMPTY`
+**Trigger:** `SCAN_SUCCESS` with a DNI that matches a visitor whose `attendanceStatus === false`, from any appFlow state
+
+### Expected zone state
+| Zone | State |
+|---|---|
+| Zone 1 | Normal `SCAN_SUCCESS` read feedback, then `IDLE` |
+| Zone 2 | Input cleared; any previous search or selection discarded |
+| Zone 3 | `READY_EMPTY` placeholder; no visitor card, no REGISTRAR ASISTENCIA button |
+| Toast | "Asistencia registrada: [visitorName]" with **Deshacer** (success kind, top right) |
+
+### Pass criteria
+- The attendance record is written without any tap
+- Only one chirp plays (the `SCAN_SUCCESS` read chirp)
+- The scanner can read the next visitor straight away; the same code is ignored until it leaves the frame (re-scan guard)
+
+---
+
+## Story 9: Scan — already attended visitor (duplicate scan)
+
+**State name:** `ATTENDANCE_PHASE / appFlow / CONFIRMED_MATCH`
+**Trigger:** `SCAN_SUCCESS` with a DNI that matches a visitor whose `attendanceStatus === true`
+
+### Expected zone state
+| Zone | State |
+|---|---|
+| Zone 3 | Story 3: card, "Asistencia Ya Registrada" badge with the original HH:MM, "Anular Registro" |
+| Toast | "Asistencia ya registrada: [visitorName] a las [HH:MM]" (duplicate kind, no Deshacer) |
+
+### Pass criteria
+- No write happens; `attendanceTimestamp` and `syncedWithCloud` are unchanged
+- The toast shows the original time, not the time of the scan
+- The toast does not repeat while the same card stays in frame
+
+---
+
+## Story 10: Scan — auto-registration write failure
+
+**State name:** `ATTENDANCE_PHASE / appFlow / CONFIRMED_MATCH` (error sub-state)
+**Trigger:** `SCAN_SUCCESS` matched an unattended visitor, but the IDB write threw
+
+### Zone 3
+Same as Story 2: the visitor card, the REGISTRAR ASISTENCIA button, and the inline error "Error al registrar asistencia. Intente de nuevo." The worker can tap the button to retry.
+
+### Pass criteria
+- The error tone (220Hz) plays; no success toast and no success chirp
+- The failure is logged as `attendance.register.failed` with `rowIndex`, `code` and `dni` only (ADR 0001); the visitor's name is never logged
+- Tapping REGISTRAR ASISTENCIA follows Story 1 (success → `READY_EMPTY` and a success toast)
+
+---
+
+## Story 11: Deshacer on the success toast
+
+**State name:** Unchanged (`READY_EMPTY` after either registration path)
+**Trigger:** The worker taps **Deshacer** within 5000ms of the success toast, and the toast has not been replaced
+
+### Pass criteria
+- The attendance record is removed (`attendanceStatus = false`, `attendanceTimestamp = null`, `syncedWithCloud = false`) with no confirmation sheet
+- The toast is dismissed and no visitor card is shown; Zone 3 stays on the `READY_EMPTY` placeholder
+- The scanner re-scan guard is unaffected: the same card still in frame is not re-registered by the undo
+- If the write fails: the failure log records it, and the toast is replaced by "No se pudo anular. Búsquelo y use \"Anular Registro\"." (no Deshacer)
+- If another toast replaces the success toast first, its Deshacer is gone and only the "Anular Registro" route remains

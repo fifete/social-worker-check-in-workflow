@@ -51,6 +51,13 @@ No visitor card is shown. Zone 3 is minimal to maximize visible space for the Zo
 ### 5. CONFIRMED_MATCH
 **Condition:** A single visitor record is selected.
 
+The card is reached by:
+- manual search (single result, or a pick from the result list), for attended and unattended visitors
+- a scan of an already-attended visitor (duplicate scan)
+- a scan of an unattended visitor whose auto-registration write failed (shows the unattended action area with the inline error)
+
+A scan of an unattended visitor whose write succeeds never reaches the card: the attendance record is written at once and Zone 3 stays on the `READY_EMPTY` placeholder (see `zone1-scanner.md`, `SCAN_SUCCESS`; `stories/confirmed-match-states.md`, Story 8).
+
 Zone 3 renders the **full visitor card** followed by the **action area**.
 
 #### Visitor card fields (in display order)
@@ -86,7 +93,7 @@ Zone 3's action area renders one of two mutually exclusive states depending on `
   - Font: `text-lg`, weight 700
 
 **User interaction:**
-- Tap → dispatches `ATTENDANCE_RECORDED`
+- Tap → dispatches `ATTENDANCE_RECORDED` (manual path, or manual retry after a failed scan auto-registration); a success toast with **Deshacer** follows (see `global.md`)
 - On IDB write failure: button stays visible; an inline danger banner (`role="alert"`, `--color-danger-bg` background, `--color-danger-text`, `text-sm`, same style as the sync error banner) appears below with:
   **"Error al registrar asistencia. Intente de nuevo."**
 

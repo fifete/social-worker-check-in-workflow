@@ -149,19 +149,29 @@ All tappable elements must meet or exceed this minimum:
 
 | Property | Value |
 |---|---|
-| Display duration | 3000ms |
+| Display duration | 5000ms with a **Deshacer** button; 3000ms without |
 | Fade in | 200ms (`ease-out`) |
 | Fade out | 300ms (`ease-in`) |
-| Position | Bottom center, 24px above viewport bottom |
-| Maximum width | 90vw |
-| Background | `--color-success` (#15803D) |
+| Position | Top right, 16px from the top and right edges of the viewport |
+| Maximum width | 60vw; the text wraps (no `nowrap`) |
+| Background | By kind: success `--color-success`, duplicate `--color-warning`, error `--color-danger` |
 | Text color | `--color-text-inverse` (#FFFFFF) |
 | Font size | `text-base` (16px) |
 | Font weight | 600 |
 | Border radius | `rounded-lg` (8px) |
 | Z-index | Above all zones, below system UI |
 
-The toast must not block the scanner zone or search input. It appears only after a successful attendance write and is purely confirmatory — no action is required. The message is **"Asistencia registrada: [visitorName]"**. A new registration while a toast is showing replaces it and restarts the display timer.
+One toast component serves both registration paths (scan and manual search). There is a single toast slot: any new toast replaces the one showing and restarts the display timer, so the replaced toast loses its **Deshacer**. Toasts never stack.
+
+| Kind | Message | Deshacer |
+|---|---|---|
+| Success | **"Asistencia registrada: [visitorName]"** | Yes |
+| Duplicate (scan of a visitor who already has an attendance record) | **"Asistencia ya registrada: [visitorName] a las [HH:MM]"** | No |
+| Undo failed | **"No se pudo anular. Búsquelo y use \"Anular Registro\"."** | No |
+
+**Deshacer** is a text button inside the success toast, at least 44px tall. Tapping it removes the attendance record immediately, with no confirmation sheet, dismisses the toast, and leaves the app on the current Zone 3 state (no card is shown). After the toast expires, the only way to remove a record is search → visitor card → "Anular Registro" → confirmation sheet. A failed undo write is logged by the failure log and shows the undo-failed toast.
+
+The toast must not cover the framing brackets of the scanner (hence the 60vw cap in the top-right corner) or the search input. It is shown only after an attendance write has succeeded, or to report a duplicate scan or a failed undo.
 
 ---
 
