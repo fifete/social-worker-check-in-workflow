@@ -78,10 +78,15 @@ export default function App() {
 
   // ─── Toast trigger ────────────────────────────────────────────────────────
   useEffect(() => {
-    if (state.context.toastPending) {
-      setToast({ visible: true, message: 'Asistencia registrada.' });
+    const attendanceToast = state.context.toast;
+    if (attendanceToast) {
+      setToast({
+        visible: true,
+        message: `Asistencia registrada: ${attendanceToast.visitorName}`,
+        id:      attendanceToast.id,
+      });
     }
-  }, [state.context.toastPending]);
+  }, [state.context.toast?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Setup phase orchestration ────────────────────────────────────────────
   const setupStateKey = JSON.stringify(state.value);
@@ -400,6 +405,7 @@ export default function App() {
         )}
 
         <Toast
+          key={toast.id}
           visible={toast.visible}
           message={toast.message}
           onDismiss={() => setToast({ visible: false, message: '' })}

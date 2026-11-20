@@ -164,7 +164,7 @@ Unchanged from Story 3, plus:
 ### Simultaneous async feedback
 | Event | Timing |
 |---|---|
-| Toast: "Asistencia registrada." | Appears at bottom center ~100ms after transition |
+| Toast: "Asistencia registrada: [visitorName]" | Appears at bottom center ~100ms after transition |
 | Audio chirp | Plays ~100ms after transition (non-blocking) |
 
 ### Pass criteria

@@ -162,8 +162,8 @@
                   "target": "READY_EMPTY",
                   "actions": [
                     "writeAttendanceToIDB",
-                    "resetSearchAndSelection",
                     "scheduleToast",
+                    "resetSearchAndSelection",
                     "scheduleChirp"
                   ]
                 },
@@ -362,7 +362,7 @@
     "showNoResults": "Renders 'Sin resultados' label in Zone 2",
     "writeAttendanceToIDB": "Sets attendanceStatus=true, attendanceTimestamp=ISO-8601 now(), syncedWithCloud=false in visitorStore",
     "resetSearchAndSelection": "Clears search input, result list, and selected visitor from transient context",
-    "scheduleToast": "Queues a non-blocking success toast (3000ms display)",
+    "scheduleToast": "Queues a non-blocking success toast (3000ms display) naming the selected visitor. Must run before resetSearchAndSelection, which clears the visitor. Each call increments toast.id so back-to-back toasts retrigger.",
     "scheduleChirp": "Queues the Web Audio API confirmation chirp (non-blocking)",
     "clearAttendanceRecord": "Sets attendanceStatus=false, attendanceTimestamp=null, syncedWithCloud=false in visitorStore",
     "dispatchBarcodeResult": "Fires BARCODE_RESULT event on appFlow with decoded visitorId payload",

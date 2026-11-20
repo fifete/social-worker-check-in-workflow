@@ -161,7 +161,7 @@ All tappable elements must meet or exceed this minimum:
 | Border radius | `rounded-lg` (8px) |
 | Z-index | Above all zones, below system UI |
 
-The toast must not block the scanner zone or search input. It appears only after a successful attendance write and is purely confirmatory — no action is required.
+The toast must not block the scanner zone or search input. It appears only after a successful attendance write and is purely confirmatory — no action is required. The message is **"Asistencia registrada: [visitorName]"**. A new registration while a toast is showing replaces it and restarts the display timer.
 
 ---
 

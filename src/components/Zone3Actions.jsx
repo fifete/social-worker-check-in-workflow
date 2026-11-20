@@ -214,9 +214,12 @@ export default function Zone3Actions({
             </button>
 
             {attendanceError && (
-              <p className="text-sm" style={{ color: 'var(--color-danger-text)' }} aria-live="assertive">
+              <div
+                className="w-full rounded-lg p-3 text-sm"
+                style={{ background: 'var(--color-danger-bg)', color: 'var(--color-danger-text)' }}
+                role="alert">
                 {attendanceError}
-              </p>
+              </div>
             )}
           </>
         )}

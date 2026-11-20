@@ -87,8 +87,8 @@ Zone 3's action area renders one of two mutually exclusive states depending on `
 
 **User interaction:**
 - Tap → dispatches `ATTENDANCE_RECORDED`
-- On IDB write failure: button stays visible; inline error appears below:
-  **"Error al registrar asistencia. Intente de nuevo."** (`text-sm`, `--color-danger-text`)
+- On IDB write failure: button stays visible; an inline danger banner (`role="alert"`, `--color-danger-bg` background, `--color-danger-text`, `text-sm`, same style as the sync error banner) appears below with:
+  **"Error al registrar asistencia. Intente de nuevo."**
 
 ---
 

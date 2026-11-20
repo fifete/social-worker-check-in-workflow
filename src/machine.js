@@ -14,7 +14,7 @@ export const checkInMachine = createMachine(
       setupError:            null,
       syncError:             null,
       reauthError:           null,
-      toastPending:          false,
+      toast:                 null,  // { id, visitorName }; id increments so repeat toasts retrigger
       retriggerPicker:       false,
       pendingAttendanceCount: 0,
       syncedCount:            0,
@@ -114,7 +114,7 @@ export const checkInMachine = createMachine(
             initial: 'READY_EMPTY',
             states: {
               READY_EMPTY: {
-                entry: assign({ toastPending: false, syncError: null, reauthError: null }),
+                entry: assign({ syncError: null, reauthError: null }),
                 on: {
                   SEARCH_RESULTS_MULTIPLE: 'MULTI_MATCH',
                   SEARCH_RESULT_SINGLE: {
@@ -154,8 +154,9 @@ export const checkInMachine = createMachine(
                     target: 'READY_EMPTY',
                     actions: [
                       'writeAttendanceToIDB',
-                      'resetSearchAndSelection',
+                      // Must run before resetSearchAndSelection, which clears the visitor the toast names
                       'scheduleToast',
+                      'resetSearchAndSelection',
                       'scheduleChirp',
                     ],
                   },
@@ -362,7 +363,12 @@ export const checkInMachine = createMachine(
       showNoResults:               assign({ selectedVisitor: null }),
       writeAttendanceToIDB:        () => {},  // component writes before dispatching event
       resetSearchAndSelection:     assign({ selectedVisitor: null }),
-      scheduleToast:               assign({ toastPending: true }),
+      scheduleToast:               assign({
+        toast: ({ context }) => ({
+          id:          (context.toast?.id ?? 0) + 1,
+          visitorName: context.selectedVisitor?.visitorName ?? '',
+        }),
+      }),
       scheduleChirp:               () => {},  // Zone1Scanner handles chirp on SCAN_SUCCESS entry
       clearAttendanceRecord:       assign({ selectedVisitor: ({ event }) => event.visitor }),
       dispatchBarcodeResult:       () => {},  // Zone1Scanner useEffect dispatches BARCODE_RESULT
