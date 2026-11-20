@@ -5,6 +5,8 @@ import { openDatabase } from './db/db.js';
 import * as visitorService from './services/visitorService.js';
 import * as authService    from './services/authService.js';
 import * as driveService   from './services/driveService.js';
+import { syncErrorCode }   from './services/syncService.js';
+import { flushLog, logEvent, sendDirect } from './services/logService.js';
 import Zone1Scanner  from './components/Zone1Scanner.jsx';
 import Zone2Search   from './components/Zone2Search.jsx';
 import Zone3Actions  from './components/Zone3Actions.jsx';
@@ -47,6 +49,7 @@ export default function App() {
       try {
         await openDatabase();
       } catch (err) {
+        sendDirect({ name: 'db.open.failed', state: 'setup', code: err?.code ?? 'DB_OPEN_FAILED' });
         setBootError('Error al abrir la base de datos. Cierre otras pestañas e intente de nuevo.');
         return;
       }
@@ -138,6 +141,7 @@ export default function App() {
           send({ type: 'HYDRATION_COMPLETE' });
         } catch (err) {
           console.error('FETCHING_DATA failed:', err);
+          sendDirect({ name: 'setup.load.failed', state: 'setup', code: err?.code ?? 'FETCH_API_ERROR' });
           send({ type: 'FETCH_FAILED' });
         }
       })();
@@ -186,7 +190,7 @@ export default function App() {
           code === 'AUTH_CANCELLED'
             ? 'La sesión no pudo renovarse. Reconecte e intente sincronizar de nuevo.'
             : 'Error al renovar la sesión. Intente de nuevo.';
-        send({ type: 'AUTH_FAILED', message });
+        flushLog().then(() => send({ type: 'AUTH_FAILED', message }));
       });
     }
 
@@ -195,11 +199,18 @@ export default function App() {
         const pending = await visitorService.getPendingSyncRecords().catch(() => []);
         if (pending.length === 0) {
           // No pending records — still purge to reset (graceful path)
+          await flushLog();
           send({ type: 'PUSH_SUCCESS', syncedCount: 0 });
           return;
         }
         const session = await visitorService.readSession().catch(() => null);
         if (!session?.workingFileId || !session?.asistenciaColumn) {
+          await logEvent({
+            name:  'sync.batch.failed',
+            state: 'sync',
+            code:  session?.workingFileId ? 'NO_ASISTENCIA_COLUMN' : 'NO_WORKING_FILE',
+          });
+          await flushLog();
           send({ type: 'PUSH_FAILED', message: 'No se encontró el archivo de trabajo.' });
           return;
         }
@@ -207,13 +218,34 @@ export default function App() {
           rowIndex:     r.rowIndex,
           columnLetter: session.asistenciaColumn,
         }));
+
+        let failedRowIndexes;
         try {
-          await driveService.batchUpdateAttendance(session.workingFileId, updates);
-          send({ type: 'PUSH_SUCCESS', syncedCount: pending.length });
+          ({ failedRowIndexes } = await driveService.batchUpdateAttendance(session.workingFileId, updates));
         } catch (err) {
-          const msg = SYNC_PUSH_MESSAGES[err?.code] ?? 'Error al sincronizar. Intente de nuevo más tarde.';
+          const driveCode = err?.code ?? 'BATCH_API_ERROR';
+          // Connection failures are shown in the UI, not logged
+          if (driveCode !== 'BATCH_NETWORK_ERROR') {
+            await logEvent({ name: 'sync.batch.failed', state: 'sync', code: syncErrorCode(driveCode) });
+          }
+          await flushLog();
+          const msg = SYNC_PUSH_MESSAGES[driveCode] ?? 'Error al sincronizar. Intente de nuevo más tarde.';
           send({ type: 'PUSH_FAILED', message: msg });
+          return;
         }
+
+        for (const rowIndex of failedRowIndexes) {
+          const record = pending.find(r => r.rowIndex === rowIndex);
+          await logEvent({
+            name:  'sync.batch.partial',
+            state: 'sync',
+            code:  'SYNC_PARTIAL_WRITE',
+            rowIndex,
+            dni:   record?.visitorId,
+          });
+        }
+        await flushLog();
+        send({ type: 'PUSH_SUCCESS', syncedCount: pending.length });
       })();
     }
 
@@ -227,6 +259,7 @@ export default function App() {
           send({ type: 'PURGE_COMPLETE' });
         } catch (err) {
           console.error('Purge failed after successful Drive push:', err);
+          logEvent({ name: 'sync.purge.failed', state: 'sync', code: 'PURGE_FAILED' });
           // Drive data is correct; surface a warning but still complete the reset
           // ⚠️ machine has no PURGE_FAILED path; we force PURGE_COMPLETE and show warning
           send({ type: 'PURGE_COMPLETE' });

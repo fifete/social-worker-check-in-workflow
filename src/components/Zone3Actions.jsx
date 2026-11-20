@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import * as visitorService from '../services/visitorService.js';
+import { logEvent } from '../services/logService.js';
 
 function formatTime(isoString) {
   if (!isoString) return '—';
@@ -92,7 +93,14 @@ export default function Zone3Actions({
       try {
         await visitorService.recordAttendance(selectedVisitor.visitorId);
         send({ type: 'ATTENDANCE_RECORDED' });
-      } catch {
+      } catch (err) {
+        logEvent({
+          name:     'attendance.register.failed',
+          state:    'attendance',
+          code:     err?.code ?? 'ATTENDANCE_WRITE_FAILED',
+          rowIndex: selectedVisitor.rowIndex,
+          dni:      selectedVisitor.visitorId,
+        });
         setAttendanceError('Error al registrar asistencia. Intente de nuevo.');
       }
     }
@@ -104,7 +112,13 @@ export default function Zone3Actions({
         await visitorService.undoAttendance(selectedVisitor.visitorId);
         const updated = await visitorService.getVisitorById(selectedVisitor.visitorId);
         send({ type: 'UNDO_ATTENDANCE', visitor: updated });
-      } catch {
+      } catch (err) {
+        logEvent({
+          name:     'attendance.undo.failed',
+          state:    'attendance',
+          code:     err?.code ?? 'UNDO_WRITE_FAILED',
+          rowIndex: selectedVisitor.rowIndex,
+        });
         setUndoError('Error al anular el registro. Intente de nuevo.');
       }
     }

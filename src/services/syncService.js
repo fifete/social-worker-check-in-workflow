@@ -19,6 +19,20 @@ const REAUTH_MESSAGES = {
   SESSION_WRITE_FAILED: 'Error al guardar la sesión renovada. Intente de nuevo.',
 };
 
+const SYNC_CODE_BY_DRIVE_CODE = {
+  BATCH_UNAUTHORIZED:  'SYNC_UNAUTHORIZED',
+  BATCH_FORBIDDEN:     'SYNC_FORBIDDEN',
+  BATCH_RATE_LIMITED:  'SYNC_RATE_LIMITED',
+  BATCH_SERVER_ERROR:  'SYNC_SERVER_ERROR',
+  BATCH_NETWORK_ERROR: 'SYNC_NETWORK_ERROR',
+  NO_TOKEN:            'SYNC_NO_TOKEN',
+};
+
+/** Maps a driveService batch error code to its SyncErrorCode. */
+export function syncErrorCode(driveCode) {
+  return SYNC_CODE_BY_DRIVE_CODE[driveCode] ?? 'SYNC_API_ERROR';
+}
+
 /**
  * Executes the full Phase 3 sync sequence.
  *
@@ -104,14 +118,7 @@ export async function runSync() {
     await driveService.batchUpdateAttendance(workingFileId, updates);
   } catch (err) {
     const driveCode = err?.code ?? 'BATCH_API_ERROR';
-    const syncCode  =
-      driveCode === 'BATCH_UNAUTHORIZED' ? 'SYNC_UNAUTHORIZED'
-      : driveCode === 'BATCH_FORBIDDEN'  ? 'SYNC_FORBIDDEN'
-      : driveCode === 'BATCH_RATE_LIMITED' ? 'SYNC_RATE_LIMITED'
-      : driveCode === 'BATCH_SERVER_ERROR' ? 'SYNC_SERVER_ERROR'
-      : driveCode === 'BATCH_NETWORK_ERROR' ? 'SYNC_NETWORK_ERROR'
-      : driveCode === 'NO_TOKEN'           ? 'SYNC_NO_TOKEN'
-      : 'SYNC_API_ERROR';
+    const syncCode  = syncErrorCode(driveCode);
 
     return {
       status:  'ERROR',

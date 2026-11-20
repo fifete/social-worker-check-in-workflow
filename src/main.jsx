@@ -3,6 +3,9 @@ import ReactDOM from 'react-dom/client';
 import App from './App.jsx';
 import './index.css';
 import * as authService from './services/authService.js';
+import { initLog } from './services/logService.js';
+
+initLog();
 
 // Load Google Identity Services; call initAuth once script is ready
 const gisScript = document.createElement('script');

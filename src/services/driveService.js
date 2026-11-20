@@ -126,8 +126,10 @@ export async function fetchSheetData(workingFileId) {
 
 /**
  * Writes attendance values to the ASISTENCIA column via batchUpdate.
+ * Sheets answers 200 with one result per range; a range with no updated cells was not written.
  * @param {string} workingFileId
  * @param {Array<{rowIndex: number, columnLetter: string}>} updates
+ * @returns {Promise<{failedRowIndexes: number[]}>} rows the 200 response did not confirm
  */
 export async function batchUpdateAttendance(workingFileId, updates) {
   const headers = await authHeaders();
@@ -153,7 +155,17 @@ export async function batchUpdateAttendance(workingFileId, updates) {
     throw { code: 'BATCH_NETWORK_ERROR' };
   }
 
-  if (response.ok) return; // HTTP 200 — success
+  if (response.ok) { // HTTP 200 — success
+    const body = await response.json().catch(() => null);
+    // responses[0] is the header write; responses[i] belongs to updates[i - 1]
+    const results = body?.responses;
+    if (!Array.isArray(results) || results.length !== data.length) return { failedRowIndexes: [] };
+    return {
+      failedRowIndexes: updates
+        .filter((_, i) => !(results[i + 1]?.updatedCells > 0))
+        .map(({ rowIndex }) => rowIndex),
+    };
+  }
 
   if (response.status === 401) throw { code: 'BATCH_UNAUTHORIZED' };
   if (response.status === 403) throw { code: 'BATCH_FORBIDDEN' };

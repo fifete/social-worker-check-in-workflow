@@ -1,7 +1,7 @@
 import { openDB } from 'idb';
 
 const DB_NAME = 'checkInDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let _db = null;
 
@@ -23,6 +23,10 @@ export function openDatabase() {
         }
         if (!db.objectStoreNames.contains('sessionStateStore')) {
           db.createObjectStore('sessionStateStore', { keyPath: 'sessionId' });
+        }
+        // Not cleared by the purge: see docs/adr/0002-log-store-survives-the-purge.md
+        if (!db.objectStoreNames.contains('logStore')) {
+          db.createObjectStore('logStore', { keyPath: 'id', autoIncrement: true });
         }
       },
       blocked() {
